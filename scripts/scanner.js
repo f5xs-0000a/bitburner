@@ -10,7 +10,7 @@ class ScannedMachine extends Machine {
         super(ns, hostname, parent_host, degree);
     }
 
-    get_backdoor_string() {
+    get_backdoor_string(ns) {
         if (this.backdoored) {
             return "";
         }
@@ -20,6 +20,10 @@ class ScannedMachine extends Machine {
         }
 
         if (this.player_owned) {
+            return "";
+        }
+
+        if (this.min_security < ns.getHackingLevel()) {
             return "";
         }
 
@@ -138,7 +142,7 @@ export function get_network(ns) {
 function backdoor_mode(ns, network) {
     let output = "\n";
     for (let machine of network) {
-        output += machine.get_backdoor_string();
+        output += machine.get_backdoor_string(ns);
     }
 
     ns.tprint(output);
