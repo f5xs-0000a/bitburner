@@ -20,6 +20,61 @@ export class Machine {
         // to be filled later.
         this.path = "";
     }
+
+    get_backdoor_string() {
+        if (this.backdoored) {
+            return "";
+        }
+
+        if (!this.is_root) {
+            return "";
+        }
+
+        if (this.player_owned) {
+            return "";
+        }
+
+        let output = "home; ";
+
+
+        for (let [index, path] of this.path.split("/").entries()) {
+            if (index < 2) {
+                continue;
+            }
+            
+            output += "connect " + path + "; ";
+        }
+
+        return output + "backdoor;\n"
+    }
+
+    nuke(ns) {
+        // no need to nuke a machine already nuked
+        if (this.is_root) {
+            return 1;
+        }
+
+        // crack as many ports as we can. if it fails, then let it be
+        try {
+            ns.brutessh(this.hostname);
+            ns.ftpcrack(this.hostname);
+            ns.relaysmtp(this.hostname);
+            ns.httpworm(this.hostname);
+            ns.sqlinject(this.hostname);
+        }
+        catch (err) {
+            // do nothing
+        }
+
+        try {
+            ns.nuke(this.hostname);
+            return 2;
+        }
+        
+        catch(err) {
+            return 0;
+        }
+    }
 }
 
 export function get_network(ns) {
@@ -35,7 +90,6 @@ export function get_network(ns) {
             // don't bother with a child node already traversed
             let found_already = false;
             for (let traversed_child of traversed) {
-                ns.tprint(traversed_child.hostname, " ",  child)
                 if (traversed_child.hostname == child) {
                     found_already = true;
                     break;
@@ -45,7 +99,6 @@ export function get_network(ns) {
             if (found_already) {
                 continue;
             }
-            ns.tprint("NEW! " + child)
 
             // determine the properties of this new child
             let new_child = new Machine(
@@ -88,10 +141,69 @@ export function get_network(ns) {
 export async function main(ns) {
     let flags = ns.flags([
         ["path", false],
-        ["json", false],
+        ["backdoor", false],
+        ["nuke", false],
+        ["show-all", false],
     ]);
 
     let network = get_network(ns);
+
+    // backdoor mode
+    if (flags["backdoor"]) {
+        let output = "\n";
+        for (let machine of network) {
+            output += machine.get_backdoor_string();
+        }
+
+        ns.tprint(output);
+        return;
+    }
+
+    // nuke mode
+    if (flags["nuke"]) {
+        let nuked = [];
+
+        for (let machine of network) {
+            let nuke_status = machine.nuke(ns);
+
+            if (nuke_status == 2) {
+                nuked.push([machine, true, true]);
+            }
+
+            else if (nuke_status == 1) {
+                nuked.push([machine, false, true]);
+            }
+
+            else if (nuke_status == 0) {
+                nuked.push([machine, false, false]);
+            }
+        }
+
+        for (let [machine, newly_nuked, is_nuked] of nuked) {
+            let print_line = "";
+            if (newly_nuked) {
+                print_line += "! ";
+            }
+
+            else {
+                print_line += "  ";
+            }
+
+            if (is_nuked) {
+                print_line += "Y ";
+            }
+
+            else {
+                print_line += "  ";
+            }
+
+            print_line += machine.hostname;
+
+            ns.tprint(print_line);
+        }
+
+        return;
+    }
 
     // get the string length
     let max_str_len = 0;
@@ -127,3 +239,4 @@ export async function main(ns) {
         }
     }
 }
+
