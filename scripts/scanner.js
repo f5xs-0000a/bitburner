@@ -1,24 +1,13 @@
-export class Machine {
+import { Machine } from "machine_class.js";
+
+class ScannedMachine extends Machine {
     constructor(
         ns,
         hostname,
         parent_host,
         degree
     ) {
-        this.hostname = hostname;
-        this.parent_host = parent_host;
-        this.degree = degree;
-
-        let stats = ns.getServer(hostname);
-
-        this.is_root = stats.hasAdminRights;
-        this.backdoored = stats.backdoorInstalled;
-        this.max_money = stats.moneyMax;
-        this.player_owned = stats.purchasedByPlayer;
-        this.hacking_skill = stats.requiredHackingSkill;
-
-        // to be filled later.
-        this.path = "";
+        super(ns, hostname, parent_host, degree);
     }
 
     get_backdoor_string() {
@@ -75,11 +64,19 @@ export class Machine {
             return 0;
         }
     }
+
+    sniff_files(ns) {
+        if (this.degree == 0) {
+            return;
+        }
+
+        return ns.ls(this.hostname);
+    }
 }
 
 export function get_network(ns) {
     let traversed = [];
-    let pending = [new Machine(ns, "home", "", 0)];
+    let pending = [new ScannedMachine(ns, "home", "", 0)];
 
     while (0 < pending.length) {
         // BFS, not DFS. therefore, don't use pop()
@@ -101,7 +98,7 @@ export function get_network(ns) {
             }
 
             // determine the properties of this new child
-            let new_child = new Machine(
+            let new_child = new ScannedMachine(
                 ns,
                 child,
                 machine.hostname,
@@ -138,74 +135,59 @@ export function get_network(ns) {
     return traversed;
 }
 
-export async function main(ns) {
-    let flags = ns.flags([
-        ["path", false],
-        ["backdoor", false],
-        ["nuke", false],
-        ["show-all", false],
-    ]);
-
-    let network = get_network(ns);
-
-    // backdoor mode
-    if (flags["backdoor"]) {
-        let output = "\n";
-        for (let machine of network) {
-            output += machine.get_backdoor_string();
-        }
-
-        ns.tprint(output);
-        return;
+function backdoor_mode(ns, network) {
+    let output = "\n";
+    for (let machine of network) {
+        output += machine.get_backdoor_string();
     }
 
-    // nuke mode
-    if (flags["nuke"]) {
-        let nuked = [];
+    ns.tprint(output);
+}
 
-        for (let machine of network) {
-            let nuke_status = machine.nuke(ns);
+function nuke_mode(ns, network, show_all) {
+    let nuked = [];
 
-            if (nuke_status == 2) {
-                nuked.push([machine, true, true]);
-            }
+    for (let machine of network) {
+        let nuke_status = machine.nuke(ns);
 
-            else if (nuke_status == 1) {
-                nuked.push([machine, false, true]);
-            }
-
-            else if (nuke_status == 0) {
-                nuked.push([machine, false, false]);
-            }
+        if (nuke_status == 2) {
+            nuked.push([machine, true, true]);
         }
 
-        for (let [machine, newly_nuked, is_nuked] of nuked) {
-            let print_line = "";
-            if (newly_nuked) {
-                print_line += "! ";
-            }
-
-            else {
-                print_line += "  ";
-            }
-
-            if (is_nuked) {
-                print_line += "Y ";
-            }
-
-            else {
-                print_line += "  ";
-            }
-
-            print_line += machine.hostname;
-
-            ns.tprint(print_line);
+        else if (nuke_status == 1) {
+            nuked.push([machine, false, true]);
         }
 
-        return;
+        else if (show_all && nuke_status == 0) {
+            nuked.push([machine, false, false]);
+        }
     }
 
-    // get the string length
+    for (let [machine, newly_nuked, is_nuked] of nuked) {
+        let print_line = "";
+        if (newly_nuked) {
+            print_line += "! ";
+        }
+
+        else {
+            print_line += "  ";
+        }
+
+        if (is_nuked) {
+            print_line += "Y ";
+        }
+
+        else {
+            print_line += "  ";
+        }
+
+        print_line += machine.hostname;
+
+        ns.tprint(print_line);
+    }
+}
+
+function display_mode(ns, network, flags) {
     let max_str_len = 0;
     for (let machine of network) {
         if (flags["path"]) {
@@ -240,3 +222,65 @@ export async function main(ns) {
     }
 }
 
+function sniff_mode(ns, network, path_mode) {
+    let nuked_machines = [];
+    let machines = get_network(ns);
+
+    for (let machine of network) {
+        if (machine.degree == 0) {
+            continue;
+        }
+
+        let files = machine.sniff_files(ns);
+
+        if (files.length == 0) {
+            continue;
+        }
+
+        if (path_mode) {
+            ns.tprint(machine["path"] + ":");
+        }
+
+        else {
+            ns.tprint(machine["hostname"] + ":");
+        }
+
+        for (let file of files) {
+            ns.tprint("> " + file);
+        }
+
+        ns.tprint("");
+    }
+}
+
+export async function main(ns) {
+    let flags = ns.flags([
+        ["path", false],
+        ["backdoor", false],
+        ["nuke", false],
+        ["show-all", false],
+        ["sniff", false],
+    ]);
+
+    let network = get_network(ns);
+
+    // backdoor mode
+    if (flags["backdoor"]) {
+        backdoor_mode(ns, network);
+        return;
+    }
+
+    // nuke mode
+    if (flags["nuke"]) {
+        nuke_mode(ns, network, flags["show-all"]);
+        return;
+    }
+
+    // sniff mode
+    if (flags["sniff"]) {
+        sniff_mode(ns, network, flags["path"]);
+        return;
+    }
+
+    display_mode(ns, network, flags);
+}
