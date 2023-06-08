@@ -62,8 +62,41 @@ function update_machine_stats(
 
     machine["hack_yield"] = current_pool * hack_rate;
     machine["hack_time"] = ns.getHackTime(machine["hostname"]);
+    machine["hack_chance"] = ns.hackAnalyzeChance(machine["hostname"]);
 
     return machine;
+}
+
+// Minimizes security of a machine to its minimum.
+//
+// This is recommended only when starting the total hacking phase.
+async function minimize_security(
+    ns,
+    target,
+    running_machine
+) {
+    let free_ram = get_free_ram(ns, running_machine) * (1 - RESERVATION_RATE);
+    let has_posted = false;
+    while (target["min_sec_lvl"] < ns.getServerSecurityLevel(target["hostname"])) {
+        if (!has_posted) {
+            print_header_bar(ns, target["hostname"]);
+            ns.print("Machine is secure.");
+            has_posted = true;
+        }
+        ns.print("Weakening... ( ~" + target["hack_time"] * WEAKEN_TIME_MUL / 1000 + "s )");
+
+        await exec_mt_wait(
+            ns,
+            "child_grow.js",
+            running_machine["hostname"],
+            // we don't care. just run as much threads as we can.
+            Math.floor(free_ram / running_machine["grow_mem"]),
+            [target["hostname"]],
+            target["hack_time"] * WEAKEN_TIME_MUL,
+        );
+    }
+
+    return update_machine_stats(ns, target);
 }
 
 // Updates the target statistics when it's felt like the target machine is
@@ -90,12 +123,14 @@ async function fix_overhack(
         return current_pool * (1 + e) <= target["hack_yield"];
     };
 
+    // keep growing while overhacked
     let free_ram = get_free_ram(ns, running_machine) * (1 - RESERVATION_RATE);
     let has_posted = false;
     while (is_overhacked()) {
         if (!has_posted) {
             print_header_bar(ns, target["hostname"]);
             ns.print("Machine is overhacked.");
+            has_posted = true;
         }
         ns.print("Growing... ( ~" + target["hack_time"] * GROW_TIME_MUL / 1000 + "s )");
 
@@ -304,7 +339,9 @@ export async function main(ns) {
 
     // fix overhack first
     for (let machine of networks) {
+        await minimize_security(ns, machine, machine_stats);
         await fix_overhack(ns, machine, machine_stats);
+        await minimize_security(ns, machine, machine_stats);
     }
 
     return;
@@ -318,3 +355,4 @@ export async function main(ns) {
     }
     */
 }
+
