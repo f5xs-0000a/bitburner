@@ -1,4 +1,3 @@
-// TODO: nuke_machine should be in its own procedure, after returning the networks
 export function get_network(ns) {
     let traversed = [];
     let pending = [{ "hostname": "home", "parent": "", "degree": 0 }];
@@ -31,8 +30,13 @@ export function get_network(ns) {
             pending.push(new_child);
         }
 
-        machine["is_root"] = ns.hasRootAccess(machine["hostname"]);
-        //machine["is_backdoor"] = Server.backdoorInstalled(); // determine how to get Server interface first
+        let stats = ns.getServer(machine["hostname"]);
+
+        machine["is_root"] = stats.hasAdminRights;
+        machine["backdoored"] = stats.backdoorInstalled;
+        machine["max_money"] = stats.moneyMax;
+        machine["player_owned"] = stats.purchasedByPlayer;
+        machine["hacking_skill"] = stats.requiredHackingSkill;
 
         // put this node into list of traversed machines
         traversed.push(machine);
