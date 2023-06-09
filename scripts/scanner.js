@@ -1,6 +1,19 @@
 import { Machine } from "machine_class.js";
 
 class ScannedMachine extends Machine {
+    /**
+     * @param {NS} ns
+     *     - NetScript environment
+     * @param {string} hostname
+     *     - hostname of the machine
+     * @param {string} parent_host
+     *     - hostname of the parent machine (closer to home)
+     *     - defaults to ""
+     * @param {number} degree
+     *     - least number of jumps required to get from home
+     *     - defaults to 0
+     * @returns {Machine}
+    */
     constructor(
         ns,
         hostname,
@@ -10,6 +23,11 @@ class ScannedMachine extends Machine {
         super(ns, hostname, parent_host, degree);
     }
 
+    /**
+     * @param {NS} ns
+     *     - NetScript environment
+     * @returns {string}
+     */
     get_backdoor_string(ns) {
         if (this.backdoored) {
             return "";
@@ -41,6 +59,11 @@ class ScannedMachine extends Machine {
         return output + "backdoor;\n"
     }
 
+    /**
+     * @param {NS} ns
+     *     - NetScript environment
+     * @returns {integer}
+     */
     nuke(ns) {
         // no need to nuke a machine already nuked
         if (this.is_root) {
@@ -69,15 +92,25 @@ class ScannedMachine extends Machine {
         }
     }
 
+    /**
+     * @param {NS} ns
+     *     - NetScript environment
+     * @returns {string[]}
+     */
     sniff_files(ns) {
         if (this.degree == 0) {
-            return;
+            return [];
         }
 
         return ns.ls(this.hostname);
     }
 }
 
+/**
+ * @param {NS} ns
+ *     - NetScript environment
+ * @returns {Machine[]}
+ */
 export function get_network(ns) {
     let traversed = [];
     let pending = [new ScannedMachine(ns, "home", "", 0)];
@@ -139,6 +172,13 @@ export function get_network(ns) {
     return traversed;
 }
 
+/**
+ * @param {NS} ns
+ *     - NetScript environment
+ * @param {Machine[]} network
+ *     - list of machines in the network
+ * @returns {void}
+ */
 function backdoor_mode(ns, network) {
     let output = "\n";
     for (let machine of network) {
@@ -148,6 +188,15 @@ function backdoor_mode(ns, network) {
     ns.tprint(output);
 }
 
+/**
+ * @param {NS} ns
+ *     - NetScript environment
+ * @param {Machine[]} network
+ *     - list of machines in the network
+ * @param {bool} show_all
+ *     - whether to also include machines not yet nuked
+ * @returns {void}
+ */
 function nuke_mode(ns, network, show_all) {
     let nuked = [];
 
@@ -191,10 +240,19 @@ function nuke_mode(ns, network, show_all) {
     }
 }
 
-function display_mode(ns, network, flags) {
+/**
+ * @param {NS} ns
+ *     - NetScript environment
+ * @param {Machine[]} network
+ *     - list of machines in the network
+ * @param {bool} path
+ *     - whether to show the full traversal path of the network
+ * @returns {void}
+ */
+function display_mode(ns, network, path_mode) {
     let max_str_len = 0;
     for (let machine of network) {
-        if (flags["path"]) {
+        if (path_mode) {
             if (max_str_len < machine.path.length) {
                 max_str_len = machine.path.length;
             }
@@ -208,7 +266,7 @@ function display_mode(ns, network, flags) {
     }
 
     for (let machine of network) {
-        if (ns.args.includes("--path")) {
+        if (path_mode) {
             ns.tprint(
                 machine.path +
                 " ".repeat(max_str_len + 2 - machine.path.length) +
@@ -226,6 +284,15 @@ function display_mode(ns, network, flags) {
     }
 }
 
+/**
+ * @param {NS} ns
+ *     - NetScript environment
+ * @param {Machine[]} network
+ *     - list of machines in the network
+ * @param {bool} path
+ *     - whether to show the full traversal path of the network
+ * @returns {void}
+ */
 function sniff_mode(ns, network, path_mode) {
     let nuked_machines = [];
     let machines = get_network(ns);
@@ -257,6 +324,7 @@ function sniff_mode(ns, network, path_mode) {
     }
 }
 
+/** @param {NS} ns */
 export async function main(ns) {
     let flags = ns.flags([
         ["path", false],
