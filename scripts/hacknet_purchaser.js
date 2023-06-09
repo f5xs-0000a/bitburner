@@ -1,9 +1,19 @@
 class UpgradeGovernor {
+    /**
+     * @returns {UpgradeGovernor}
+     */
     constructor() {
         this.ipp_log = -Infinity;
         this.action = async function(_ns) {};
     }
 
+    /**
+     * Updates the action and the investment-per-price threshold to beat.
+     * @params {number} ipp_log
+     *     - the logarithm of the quotient of the investment over price
+     * @action {async (NS) => void}
+     *     - action taken upon being chosen
+     */
     assess_improvement_general(ipp_log, action) {
         if (this.ipp_log < ipp_log) {
             this.action = action;
@@ -11,6 +21,18 @@ class UpgradeGovernor {
         }
     }
 
+    /**
+     * @param {number} level
+     *     - the current level of the hacknet node.
+     * @param {number} ram
+     *     - the current RAM of the hacknet node.
+     * @param {number} cores
+     *     - the current number of cores of the hacknet node.
+     * @param {number} price
+     *     - the price of the upgrade.
+     * @param {async (NS) => void} action
+     *     - the action taken upon being chosen.
+     */
     assess_better_level(level, ram, cores, price, action) {
         if (level == 200) {
             return;
@@ -23,6 +45,18 @@ class UpgradeGovernor {
         );
     }
 
+    /**
+     * @param {number} level
+     *     - the current level of the hacknet node.
+     * @param {number} ram
+     *     - the current RAM of the hacknet node.
+     * @param {number} cores
+     *     - the current number of cores of the hacknet node.
+     * @param {number} price
+     *     - the price of the upgrade.
+     * @param {async (NS) => void} action
+     *     - the action taken upon being chosen.
+     */
     assess_better_cores(level, ram, cores, price, action) {
         if (cores == 16) {
             return;
@@ -35,18 +69,42 @@ class UpgradeGovernor {
         );
     }
 
+    /**
+     * @param {number} level
+     *     - the current level of the hacknet node.
+     * @param {number} ram
+     *     - the current RAM of the hacknet node.
+     * @param {number} cores
+     *     - the current number of cores of the hacknet node.
+     * @param {number} price
+     *     - the price of the upgrade.
+     * @param {async (NS) => void} action
+     *     - the action taken upon being chosen.
+     */
     assess_better_ram(level, ram, cores, price, action) {
         if (ram == 64) {
             return;
         }
         
         let improvement = rate_improvement_ram(level, ram, cores);
-        this.assess_improvement_general
+        this.assess_improvement_general(
             Math.log(improvement) - Math.log(price),
             action,
         );
     }
 
+    /**
+     * @param {number} level
+     *     - the current level of the hacknet node.
+     * @param {number} ram
+     *     - the current RAM of the hacknet node.
+     * @param {number} cores
+     *     - the current number of cores of the hacknet node.
+     * @param {number} price
+     *     - the price of the upgrade.
+     * @param {async (NS) => void} action
+     *     - the action taken upon being chosen.
+     */
     assess_hacknet_node(ns, index) {
         let stats = ns.hacknet.getNodeStats(index);
         
@@ -99,7 +157,11 @@ class UpgradeGovernor {
             }
         );
     }
-
+    
+    /**
+     * @param {NS} ns
+     *     - NetScript environment
+     */
     assess_purchasing_new_node(ns) {
         let improvement = money_gain_rate(1, 1, 1);
         let price = ns.hacknet.getPurchaseNodeCost();
@@ -114,7 +176,11 @@ class UpgradeGovernor {
         );
     }
 }
-
+    
+/**
+ * @param {NS} ns
+ *     - NetScript environment
+ */
 export async function main(ns) {
     while (true) {
         let governor = new UpgradeGovernor();
@@ -129,6 +195,13 @@ export async function main(ns) {
     }
 }
 
+    
+/**
+ * @param {NS} ns
+ *     - NetScript environment
+ * @param {number} money
+ *     - the amount of money to be expected upon finishing waiting
+ */
 async function wait_until_enough_money(ns, money) {
     let has_printed = false;
     
@@ -147,16 +220,40 @@ async function wait_until_enough_money(ns, money) {
     }
 }
 
+/**
+ * @param {number} level
+ *     - the current level of the hacknet node.
+ * @param {number} ram
+ *     - the current RAM of the hacknet node.
+ * @param {number} cores
+ *     - the current number of cores of the hacknet node.
+ */
 function rate_improvement_level(level, ram, cores) {
     return money_gain_rate(level + 1, ram, cores)
         - money_gain_rate(level, ram, cores);
 }
 
+/**
+ * @param {number} level
+ *     - the current level of the hacknet node.
+ * @param {number} ram
+ *     - the current RAM of the hacknet node.
+ * @param {number} cores
+ *     - the current number of cores of the hacknet node.
+ */
 function rate_improvement_ram(level, ram, cores) {
     return money_gain_rate(level, ram * 2, cores)
         - money_gain_rate(level, ram, cores);
 }
 
+/**
+ * @param {number} level
+ *     - the current level of the hacknet node.
+ * @param {number} ram
+ *     - the current RAM of the hacknet node.
+ * @param {number} cores
+ *     - the current number of cores of the hacknet node.
+ */
 function rate_improvement_cores(level, ram, cores) {
     return money_gain_rate(level, ram, cores + 1)
         - money_gain_rate(level, ram, cores);
@@ -167,6 +264,14 @@ function rate_improvement_cores(level, ram, cores) {
 // let's hope that the values produced by this is
 // directly proportional to what's produced in the actual
 // game
+/**
+ * @param {number} level
+ *     - the current level of the hacknet node.
+ * @param {number} ram
+ *     - the current RAM of the hacknet node.
+ * @param {number} cores
+ *     - the current number of cores of the hacknet node.
+ */
 function money_gain_rate(level, ram, cores) {
     const level_mult = level * 1.5;
     const ram_mult = Math.pow(1.035, ram - 1);
