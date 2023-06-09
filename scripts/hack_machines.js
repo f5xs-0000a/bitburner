@@ -123,7 +123,7 @@ class HackableMachine {
                 "child_weaken.js",
                 host.hostname,
                 // we don't care. just run as much threads as we can.
-                Math.floor(free_ram / host.grow_mem),
+                Math.floor(free_ram / 1.7),
                 [this.hostname],
                 this.hack_time * WEAKEN_TIME_MUL,
             );
