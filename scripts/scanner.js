@@ -1,54 +1,31 @@
 import { Machine } from "machine_class.js";
 
-class ScannedMachine extends Machine {
-    /**
-     * @param {NS} ns
-     *     - NetScript environment
-     * @param {string} hostname
-     *     - hostname of the machine
-     * @param {string} parent_host
-     *     - hostname of the parent machine (closer to home)
-     *     - defaults to ""
-     * @param {number} degree
-     *     - least number of jumps required to get from home
-     *     - defaults to 0
-     * @returns {Machine}
-    */
-    constructor(
-        ns,
-        hostname,
-        parent_host,
-        degree
-    ) {
-        super(ns, hostname, parent_host, degree);
-    }
-
+const scanned = (machine) => ({
     /**
      * @param {NS} ns
      *     - NetScript environment
      * @returns {string}
      */
-    get_backdoor_string(ns) {
-        if (this.backdoored) {
+    get_backdoor_string: (ns) => {
+        if (machine.is_backdoored()) {
             return "";
         }
 
-        if (!this.is_root) {
+        if (!machine.is_root()) {
             return "";
         }
 
-        if (this.player_owned) {
+        if (machine.is_player_owned()) {
             return "";
         }
 
-        if (this.min_security < ns.getHackingLevel()) {
+        if (ns.getHackingLevel() < machine.get_hacking_skill()) {
             return "";
         }
 
         let output = "home; ";
 
-
-        for (let [index, path] of this.path.split("/").entries()) {
+        for (let [index, path] of machine.get_path().split("/").entries()) {
             if (index < 2) {
                 continue;
             }
@@ -57,54 +34,54 @@ class ScannedMachine extends Machine {
         }
 
         return output + "backdoor;\n"
-    }
+    },
 
     /**
      * @param {NS} ns
      *     - NetScript environment
      * @returns {integer}
      */
-    nuke(ns) {
+    nuke: (ns) => {
         // no need to nuke a machine already nuked
-        if (this.is_root) {
+        if (machine.is_root) {
             return 1;
         }
 
         // crack as many ports as we can. if it fails, then let it be
         try {
-            ns.brutessh(this.hostname);
-            ns.ftpcrack(this.hostname);
-            ns.relaysmtp(this.hostname);
-            ns.httpworm(this.hostname);
-            ns.sqlinject(this.hostname);
+            ns.brutessh(machine.get_hostname());
+            ns.ftpcrack(machine.get_hostname());
+            ns.relaysmtp(machine.get_hostname());
+            ns.httpworm(machine.get_hostname());
+            ns.sqlinject(machine.get_hostname());
         }
         catch (err) {
             // do nothing
         }
 
         try {
-            ns.nuke(this.hostname);
+            ns.nuke(machine.get_hostname());
             return 2;
         }
         
         catch(err) {
             return 0;
         }
-    }
+    },
 
     /**
      * @param {NS} ns
      *     - NetScript environment
      * @returns {string[]}
      */
-    sniff_files(ns) {
-        if (this.degree == 0) {
+    sniff_files: (ns) => {
+        if (machine.get_degree() == 0) {
             return [];
         }
 
-        return ns.ls(this.hostname);
+        return ns.ls(machine.get_hostname());
     }
-}
+})
 
 /**
  * @param {NS} ns
@@ -113,18 +90,20 @@ class ScannedMachine extends Machine {
  */
 export function get_network(ns) {
     let traversed = [];
-    let pending = [new ScannedMachine(ns, "home", "", 0)];
+    let home = new Machine(ns, "home", "", 0);
+    Object.assign(home, scanned(home));
+    let pending = [home];
 
     while (0 < pending.length) {
         // BFS, not DFS. therefore, don't use pop()
         let machine = pending.shift();
 
         // identify the children nodes of this machine
-        for (let child of ns.scan(machine.hostname)) {
+        for (let child of ns.scan(machine.get_hostname())) {
             // don't bother with a child node already traversed
             let found_already = false;
             for (let traversed_child of traversed) {
-                if (traversed_child.hostname == child) {
+                if (traversed_child.get_hostname() == child) {
                     found_already = true;
                     break;
                 }
@@ -135,38 +114,13 @@ export function get_network(ns) {
             }
 
             // determine the properties of this new child
-            let new_child = new ScannedMachine(
-                ns,
-                child,
-                machine.hostname,
-                machine.degree + 1
-            );
-
+            let new_child = machine.create_child(ns, child);
+            Object.assign(new_child, scanned(new_child));
             pending.push(new_child);
         }
 
         // put this node into list of traversed machines
         traversed.push(machine);
-    }
-
-    // adjust the traversal tree
-    let max_degree = Math.max(...traversed.map(m => m.degree));
-    for (let i = 0; i <= max_degree; i += 1) {
-        for (let node of traversed) {
-            if (node.degree != i) {
-                continue;
-            }
-
-            if (i == 0) {
-                node.path = "/" + node.hostname;
-            }
-
-            else {
-                node.path = traversed
-                    .find(function(n) { return n.hostname == node.parent_host })
-                    .path + "/" + node.hostname;
-            }
-        }
     }
 
     return traversed;
@@ -201,6 +155,8 @@ function nuke_mode(ns, network, show_all) {
     let nuked = [];
 
     for (let machine of network) {
+        ns.tprint(machine);
+        ns.tprint(show_all);
         let nuke_status = machine.nuke(ns);
 
         if (nuke_status == 2) {
@@ -234,7 +190,7 @@ function nuke_mode(ns, network, show_all) {
             print_line += "  ";
         }
 
-        print_line += machine.hostname;
+        print_line += machine.get_hostname();
 
         ns.tprint(print_line);
     }
@@ -253,14 +209,14 @@ function display_mode(ns, network, path_mode) {
     let max_str_len = 0;
     for (let machine of network) {
         if (path_mode) {
-            if (max_str_len < machine.path.length) {
-                max_str_len = machine.path.length;
+            if (max_str_len < machine.get_path().length) {
+                max_str_len = machine.get_path().length;
             }
         }
 
         else {
-            if (max_str_len < machine.hostname.length) {
-                max_str_len = machine.hostname.length;
+            if (max_str_len < machine.get_hostname().length) {
+                max_str_len = machine.get_hostname().length;
             }
         }
     }
@@ -268,17 +224,17 @@ function display_mode(ns, network, path_mode) {
     for (let machine of network) {
         if (path_mode) {
             ns.tprint(
-                machine.path +
-                " ".repeat(max_str_len + 2 - machine.path.length) +
-                machine.is_root
+                machine.get_path() +
+                " ".repeat(max_str_len + 2 - machine.get_path().length) +
+                machine.is_root()
             );
         }
 
         else {
             ns.tprint(
-                machine.hostname +
-                " ".repeat(max_str_len + 2 - machine.hostname.length) +
-                machine.is_root
+                machine.get_hostname() +
+                " ".repeat(max_str_len + 2 - machine.get_hostname().length) +
+                machine.is_root()
             );
         }
     }
@@ -294,11 +250,8 @@ function display_mode(ns, network, path_mode) {
  * @returns {void}
  */
 function sniff_mode(ns, network, path_mode) {
-    let nuked_machines = [];
-    let machines = get_network(ns);
-
     for (let machine of network) {
-        if (machine.degree == 0) {
+        if (machine.get_degree() == 0) {
             continue;
         }
 
@@ -309,11 +262,11 @@ function sniff_mode(ns, network, path_mode) {
         }
 
         if (path_mode) {
-            ns.tprint(machine["path"] + ":");
+            ns.tprint(machine.get_path() + ":");
         }
 
         else {
-            ns.tprint(machine["hostname"] + ":");
+            ns.tprint(machine.get_hostname() + ":");
         }
 
         for (let file of files) {
@@ -354,5 +307,5 @@ export async function main(ns) {
         return;
     }
 
-    display_mode(ns, network, flags);
+    display_mode(ns, network, flags["path"]);
 }

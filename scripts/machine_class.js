@@ -31,7 +31,27 @@ export class Machine {
         this._min_security = stats.minDifficulty;
 
         // to be filled later.
-        this._path = "";
+        this._path = "/" + hostname;
+    }
+
+    create_child(
+        ns,
+        hostname,
+    ) {
+        let child = new Machine(
+            ns,
+            hostname,
+            this.get_hostname(),
+            this.degree + 1,
+        );
+
+        child._path = this._path + "/" + hostname;
+
+        return child;
+    }
+
+    get_degree() {
+        return this._degree;
     }
 
     get_hostname() {
