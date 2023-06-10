@@ -36,6 +36,7 @@ async function wait_pid_with_time_hint(ns, pid, end_time, interval = 250) {
     }
 }
 
+        let uuid = 
 ////////////////////////////////////////////////////////////////////////////////
 
 function tprint_help(ns) {
@@ -186,7 +187,6 @@ class HackableMachine {
     produce_weaken_threads(ns) {
         let threads = this.get_overflow_security_credits(ns);
         let time_to_weaken = this.get_weaken_time_ms(ns);
-        let uuid = 
 
         let do_weaken = function (ns, host_name, thread_count) {
             ns.print(
@@ -201,7 +201,7 @@ class HackableMachine {
 
             return ns.exec(
                 "./child_weaken.js",
-                host_name
+                host_name,
                 threads,
                 this.hostname,
             );
@@ -247,7 +247,6 @@ class HackGovernor {
 
         this._hostname = ns.getHostname();
     }
-
     get_hostname() {
         return this._hostname;
     }
@@ -305,7 +304,7 @@ class HackGovernor {
         // the hardest to crack machines first.
         let ending_times = [];
         while (0 < calls.keys()) {
-            let available = weaken_threads_available();
+            let available = this.weaken_threads_available();
 
             // add a job
             if (0 < available) {
@@ -315,7 +314,7 @@ class HackGovernor {
                 for (let [hostname, deets] of calls) {
                     if (longest_time < deets["weaken_time"]) {
                         highest_key = hostname;
-                        longest_time = deets["weaken_time"]);
+                        longest_time = deets["weaken_time"];
                     }
                 }
 
@@ -377,6 +376,8 @@ class HackGovernor {
         await wait_pid_with_time_hint(ns, to_wait[0], to_wait[1]);
     }
 
+
+    /*
     hgw_sequence(ns) {
         // sort the networks by yield
         this._networks.sort(
@@ -412,7 +413,7 @@ class HackGovernor {
         while (true) {
             // if there is enough memory to perform a single weaken(), we have
             // enough memory to do anything.
-            if (0 < weaken_threads_available()) {
+            if (0 < this.weaken_threads_available()) {
                 // iterate through the machines to see which needs to run a
                 // command
                 for (let machine in this._networks) {
@@ -440,7 +441,7 @@ class HackGovernor {
 
                         // given the current security of the machine, calculate
                         // how many threads of weaken() we have to do
-                        let security_level = = ns
+                        let security_level = ns
                             .getServerSecurityLevel(machine.get_hostname());
                         let offset_security = security_level
                             - ns.get_min_security();
@@ -486,7 +487,7 @@ class HackGovernor {
                             do_hack = true;
                         }
 
-                        else if (!should_hack && should_grow {
+                        else if (!should_hack && should_grow) {
                             do_hack = false;
                         }
 
@@ -520,7 +521,7 @@ class HackGovernor {
                         else {
                             // determine how much to grow
                             let threads = ns.growthAnalyze(
-                                machine.get_hostname()
+                                machine.get_hostname(),
                                 machine.get_max_money() / available_money,
                             );
                             if (isNaN(threads)) {
@@ -555,6 +556,7 @@ class HackGovernor {
 
             // wait for any one to finish
             else {
+                // TODO: loop over this and remove any lingering processes
                 let next_pid = 0;
                 let next_end = 0;
                 let cur_machine = "";
@@ -575,6 +577,7 @@ class HackGovernor {
             }
         }
     }
+    */
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -593,6 +596,8 @@ export async function main(ns) {
 
     let governor = new HackGovernor(ns);
 
+}
+
     /*
     while (true) {
         for (let machine_stats of networks) {
@@ -600,5 +605,4 @@ export async function main(ns) {
         }
     }
     */
-}
-// TODO: you still need to check if wait in weaken function really works
+// TODO: you still need to check if wait in weaken function really work
