@@ -30,13 +30,13 @@ function disable_logs(ns) {
 }
 
 async function wait_pid_with_time_hint(ns, pid, end_time, interval = 250) {
-    await ns.sleep(end_time);
+    ns.tprint("Waiting until " + end_time);
+    await ns.sleep(Date.now() - end_time);
     while (ns.isRunning(pid)) {
-        await ns.sleep(250);
+        await ns.sleep(interval);
     }
 }
 
-        let uuid = 
 ////////////////////////////////////////////////////////////////////////////////
 
 function tprint_help(ns) {
@@ -123,17 +123,21 @@ class HackableMachine {
     // NOTE: this stays here because hackAnalyze() is dependent on player level
     // TODO: upget function here. this method can change depending on player
     // level
-    get_money_per_hack() {
+    get_money_per_hack(ns) {
         return ns.hackAnalyze(this.get_hostname()) * this.get_max_money();
     }
 
     // Returns the number of threads required to reduce the security of a
     // machine to its minimum
     get_overflow_security_credits(ns) {
-        let offset_security = ns.getServerSecurityLevel(this.hostname)
+        const WEAKEN_SECURITY_REDUCTION = 0.05;
+        ns.tprint("CUR SECURITY :" + ns.getServerSecurityLevel(this.get_hostname()));
+        ns.tprint("MIN SECURITY :" + this.get_min_security());
+        let offset_security = ns.getServerSecurityLevel(this.get_hostname())
             - this.get_min_security();
+        ns.tprint("OFFSET :" + offset_security / 0.05);
 
-        return Math.round(offset_security / 0.05);
+        return Math.round(offset_security / WEAKEN_SECURITY_REDUCTION);
     }
 
     get_hack_time_ms(ns) {
@@ -186,24 +190,25 @@ class HackableMachine {
     // and time to finish weakening. Useful for a governor-kind of loop.
     produce_weaken_threads(ns) {
         let threads = this.get_overflow_security_credits(ns);
+        ns.tprint("OVERFLOW: " + this.get_overflow_security_credits(ns));
         let time_to_weaken = this.get_weaken_time_ms(ns);
 
-        let do_weaken = function (ns, host_name, thread_count) {
+        let do_weaken = function (ns, host_name, thread_count, target_hostname) {
             ns.print(
                 "Weakening " +
-                this.hostname +
+                target_hostname +
                 " with " +
                 thread_count +
                 " threads (" +
-                time_to_weaken / 1000 +
+                time_to_weaken +
                 ")."
             );
 
             return ns.exec(
                 "./child_weaken.js",
                 host_name,
-                threads,
-                this.hostname,
+                thread_count,
+                target_hostname,
             );
         };
 
@@ -220,7 +225,7 @@ class HackGovernor {
         ns
     ) {
         this._networks = [];
-        for (let network of get_network(ns)) {
+        for (let machine of get_network(ns)) {
             if (machine.get_max_money() == 0) {
                 continue;
             }
@@ -229,7 +234,7 @@ class HackGovernor {
                 continue;
             }
 
-            this.networks.push(HackableMachine(network));
+            this._networks.push(new HackableMachine(machine));
         }
 
         let weaken_mem = ns.getScriptRam("child_weaken.js");
@@ -238,7 +243,7 @@ class HackGovernor {
 
         // instead of counting in free RAM, count in discrete credits instead
         this._credit_denominator = fractional_gcd(
-            fractional_gcd(weaken_mem, hack_mem),
+            fractional_gcd(weaken_mem, hack_mem, 3),
             grow_mem
         );
         this._weaken_credits = Math.round(weaken_mem / this._credit_denominator);
@@ -247,44 +252,45 @@ class HackGovernor {
 
         this._hostname = ns.getHostname();
     }
+
     get_hostname() {
         return this._hostname;
     }
 
     get_max_ram(ns) {
-        return ns.getServerMaxRam(this.hostname);
+        return ns.getServerMaxRam(this.get_hostname());
     }
 
     get_free_ram(ns) {
-        return ns.getServerUsedRam(this.hostname) - this.get_max_ram(ns);
+        return this.get_max_ram(ns) - ns.getServerUsedRam(this.get_hostname());
     }
 
     to_credits(memory) {
-        return Math.floor(memory / this.credit_denominator);
+        return Math.floor(memory / this._credit_denominator);
     }
 
     get_free_ram_credits(ns) {
         let actual_free_ram = this.get_free_ram(ns);
-        let allocated_ram = actual_ram * (1 - RESERVATION_RATE);
+        let allocated_ram = actual_free_ram * (1 - RESERVATION_RATE);
         return this.to_credits(allocated_ram);
     }
 
     weaken_threads_available(ns) {
-        get_free_ram_credits(ns) / this.weaken_credits;
+        return Math.floor(this.get_free_ram_credits(ns) / this._weaken_credits);
     }
 
     grow_threads_available(ns) {
-        get_free_ram_credits(ns) / this.grow_credits;
+        return Math.floor(this.get_free_ram_credits(ns) / this._grow_credits);
     }
 
     hack_threads_available(ns) {
-        get_free_ram_credits(ns) / this.hack_credits;
+        return Math.floor(this.get_free_ram_credits(ns) / this._hack_credits);
     }
 
-    weaken_machines(ns) {
+    async weaken_machines(ns) {
         let calls = {};
-        for (let machine in this._networks) {
-            if (machine.is_root()) {
+        for (let machine of this._networks) {
+            if (!machine.is_root()) {
                 continue;
             }
 
@@ -292,29 +298,40 @@ class HackGovernor {
                 continue;
             }
 
-            calls[machine.get_hostname()] = machine.produce_weaken_threads(ns);
+            let weaken_threads = machine.produce_weaken_threads(ns);
+
+            ns.tprint(weaken_threads);
+            if (weaken_threads["threads"] == 0) {
+                continue;
+            }
+
+            calls[machine.get_hostname()] = weaken_threads;
         }
 
         if (calls.length == 0) {
             // no machines to weaken.
             return;
         }
-
+        
         // greedily process each threads. for a single machine, take as much of
         // the hardest to crack machines first.
         let ending_times = [];
-        while (0 < calls.keys()) {
-            let available = this.weaken_threads_available();
+        while (0 < Object.keys(calls).length) {
+            // TODO: remove me
+            ns.tprint("went here");
+            await ns.sleep(1000);
+
+            let available = this.weaken_threads_available(ns);
 
             // add a job
             if (0 < available) {
                 // find the job that has the highest waiting time
                 let highest_key = null;
                 let longest_time = -Infinity;
-                for (let [hostname, deets] of calls) {
-                    if (longest_time < deets["weaken_time"]) {
+                for (let hostname in calls) {
+                    if (longest_time < calls[hostname]["weaken_time"]) {
                         highest_key = hostname;
-                        longest_time = deets["weaken_time"];
+                        longest_time = calls[hostname]["weaken_time"];
                     }
                 }
 
@@ -324,12 +341,16 @@ class HackGovernor {
                     calls[highest_key]["threads"]
                 );
 
+                ns.tprint("CHKT: " + calls[highest_key]["threads"]);
+                ns.tprint("Usable threads: " + threads);
+
                 let pid = calls[highest_key]["function"](
                     ns,
                     this.get_hostname(),
                     threads,
+                    highest_key,
                 );
-                let end_time = Date.now() + calls[highest_key]["weaken_time"] + Date.now();
+                let end_time = calls[highest_key]["weaken_time"] + Date.now();
 
                 if (pid == 0) {
                     throw new Error("Cannot run weakening thread.");
@@ -345,6 +366,7 @@ class HackGovernor {
 
                 // record the PID, hostname (TODO), and the end time
                 ending_times.push([pid, end_time]);
+                ns.tprint("354 " + ending_times);
             }
 
             // wait until the next job ends
@@ -360,25 +382,32 @@ class HackGovernor {
                 let to_wait = ending_times.splice(next_end_index, 1);
 
                 // wait until the next script ends
+                ns.tprint(ending_times);
+                ns.tprint(370);
                 await wait_pid_with_time_hint(ns, to_wait[0], to_wait[1]);
             }
         }
 
+        ns.tprint("ENDING TIMES: ")
+        ns.tprint(ending_times);
+
         // wait until every job ends
         let last_end_index = 0;
         for (let i = 1; i < ending_times.length; i += 1) {
-            if (ending_times[i][1] < ending_times[next_end_index][1]) {
-                next_end_index = i;
+            if (ending_times[i][1] < ending_times[last_end_index][1]) {
+                last_end_index = i;
             }
         }
 
-        let to_wait = ending_times.splice(next_end_index, 1);
-        await wait_pid_with_time_hint(ns, to_wait[0], to_wait[1]);
+        if (last_end_index != null) {
+            let to_wait = ending_times.splice(last_end_index, 1)[0];
+            ns.tprint(to_wait);
+            ns.tprint(384);
+            await wait_pid_with_time_hint(ns, to_wait[0], to_wait[1]);
+        }
     }
 
-
-    /*
-    hgw_sequence(ns) {
+    async hgw_sequence(ns) {
         // sort the networks by yield
         this._networks.sort(
             (a, b) => b.total_corrected_yield(ns) - a.total_corrected_yield(ns)
@@ -400,7 +429,7 @@ class HackGovernor {
             let threads = hackable_pool / machine.get_base_yield(ns);
             threads = Math.floor(threads);
 
-            network_stats[machine.get_hostname()] = {
+            machine_stats[machine.get_hostname()] = {
                 "max_hg_threads": threads,
                 "hg_pid": 0,
                 "hg_end": 0,
@@ -413,7 +442,7 @@ class HackGovernor {
         while (true) {
             // if there is enough memory to perform a single weaken(), we have
             // enough memory to do anything.
-            if (0 < this.weaken_threads_available()) {
+            if (0 < this.weaken_threads_available(ns)) {
                 // iterate through the machines to see which needs to run a
                 // command
                 for (let machine in this._networks) {
@@ -428,7 +457,7 @@ class HackGovernor {
 
                     // try weakening first
                     // if the weaken procedure for this machine is done
-                    if (network_stats[machine.get_hostname()]["weaken_end"] < Date.now()) {
+                    if (machine_stats[machine.get_hostname()]["weaken_end"] < Date.now()) {
                         // TODO: perform weaken
                         // in a single weaken() call, one can do four hack()s.
                         // that means we use a quarter of the `max_hg_threads`
@@ -436,7 +465,7 @@ class HackGovernor {
                         // there's probably an infinite sum pattern here that
                         // i'm not going to do, i'm sticking with 1/4.
                         let minimum_threads = Math.floor(
-                            network_stats[machine.get_hostname()]["max_hg_threads"] / 4
+                            machine_stats[machine.get_hostname()]["max_hg_threads"] / 4
                         );
 
                         // given the current security of the machine, calculate
@@ -455,33 +484,33 @@ class HackGovernor {
                         // don't exceed the allowed # of threads
                         threads = Math.min(
                             threads,
-                            network_stats[machine.get_hostname()]["max_hg_threads"],
+                            machine_stats[machine.get_hostname()]["max_hg_threads"],
                             this.weaken_threads_available(),
                         );
 
                         // spawn the weaken threads and assign the PID
-                        network_stats[machine.get_hostname()]["weaken_pid"] = ns
+                        machine_stats[machine.get_hostname()]["weaken_pid"] = ns
                             .exec(
                                 "./child_weaken.js",
                                 this.get_hostname(),
                                 threads,
                                 machine.get_hostname(),
                             );
-                        network_stats[machine.get_hostname()]["weaken_end"] =
+                        machine_stats[machine.get_hostname()]["weaken_end"] =
                             machine.get_hack_time() * WEAKEN_TIME_MUL + Date.now();
 
                         break;
                     }
 
-                    if (network_stats[network.get_hostname()]["hg_end"] < Date.now()) {
+                    if (machine_stats[machine.get_hostname()]["hg_end"] < Date.now()) {
                         let available_cash = ns.getServerMoneyAvailable(machine.hostname);
-                        let minimum_pool = ns.get_max_money() * (1 - HACKABLE_RATIO);
-                        let maximum_pool = ns.get_max_money() * GROW_THRESHOLD;
+                        let minimum_pool = machine.get_max_money() * (1 - HACKABLE_RATIO);
+                        let maximum_pool = machine.get_max_money() * GROW_THRESHOLD;
 
                         let should_grow = available_cash < minimum_pool;
                         let should_hack = maximum_pool < available_cash;
 
-                        let do_hack = network_stats[machine.get_hostname()]["was_hack"];
+                        let do_hack = machine_stats[machine.get_hostname()]["was_hack"];
 
                         if (should_hack && !should_grow) {
                             do_hack = true;
@@ -500,22 +529,22 @@ class HackGovernor {
                             // don't exceed the allowed # of threads
                             threads = Math.min(
                                 threads,
-                                network_stats[machine.get_hostname()]["max_hg_threads"],
+                                machine_stats[machine.get_hostname()]["max_hg_threads"],
                                 this.hack_threads_available(),
                             );
 
                             // run the program and assign PID
-                            network_stats[machine.get_hostname()]["hg_pid"] = ns
+                            machine_stats[machine.get_hostname()]["hg_pid"] = ns
                                 .exec(
                                     "./child_hack.js",
                                     this.get_hostname(),
                                     threads,
                                     machine.get_hostname(),
                                 );
-                            network_stats[machine.get_hostname()]["hg_end"] =
+                            machine_stats[machine.get_hostname()]["hg_end"] =
                                 machine.get_hack_time() + Date.now();
 
-                            network_stats[machine.get_hostname()]["was_hack"] = true;
+                            machine_stats[machine.get_hostname()]["was_hack"] = true;
                         }
 
                         else {
@@ -531,22 +560,22 @@ class HackGovernor {
                             // don't exceed the allowed # of threads
                             threads = Math.min(
                                 threads,
-                                network_stats[machine.get_hostname()]["max_hg_threads"],
+                                machine_stats[machine.get_hostname()]["max_hg_threads"],
                                 this.hack_threads_available(),
                             );
 
                             // run the program and assign PID
-                            network_stats[machine.get_hostname()]["hg_pid"] = ns
+                            machine_stats[machine.get_hostname()]["hg_pid"] = ns
                                 .exec(
                                     "./child_grow.js",
                                     this.get_hostname(),
                                     threads,
                                     machine.get_hostname(),
                                 );
-                            network_stats[machine.get_hostname()]["hg_end"] =
+                            machine_stats[machine.get_hostname()]["hg_end"] =
                                 machine.get_hack_time() * GROW_TIME_MUL + Date.now();
 
-                            network_stats[machine.get_hostname()]["was_hack"] = true;
+                            machine_stats[machine.get_hostname()]["was_hack"] = true;
                         }
 
                         break;
@@ -562,14 +591,14 @@ class HackGovernor {
                 let cur_machine = "";
 
                 for (let machine in this._networks) {
-                    if (next_end < network_stats[machine.get_hostname()]["hg_end"]) {
-                        next_end = network_stats[machine.get_hostname()]["hg_end"];
-                        next_pid = network_stats[machine.get_hostname()]["hg_pid"];
+                    if (next_end < machine_stats[machine.get_hostname()]["hg_end"]) {
+                        next_end = machine_stats[machine.get_hostname()]["hg_end"];
+                        next_pid = machine_stats[machine.get_hostname()]["hg_pid"];
                     }
 
-                    if (next_end < network_stats[machine.get_hostname()]["weaken_end"]) {
-                        next_end = network_stats[machine.get_hostname()]["weaken_end"];
-                        next_pid = network_stats[machine.get_hostname()]["weaken_pid"];
+                    if (next_end < machine_stats[machine.get_hostname()]["weaken_end"]) {
+                        next_end = machine_stats[machine.get_hostname()]["weaken_end"];
+                        next_pid = machine_stats[machine.get_hostname()]["weaken_pid"];
                     }
                 }
 
@@ -577,7 +606,6 @@ class HackGovernor {
             }
         }
     }
-    */
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -593,16 +621,13 @@ export async function main(ns) {
     }
 
     disable_logs(ns);
-
     let governor = new HackGovernor(ns);
-
+    
+    governor._networks = governor._networks.filter((machine) => machine.get_hacking_skill() < 10);
+    //ns.tprint(governor._networks);
+    //return;
+    
+    ns.tprint("Weakening machines...");
+    await ns.sleep(1000);
+    await governor.weaken_machines(ns);
 }
-
-    /*
-    while (true) {
-        for (let machine_stats of networks) {
-            await hack_machine(ns, machine_stats);
-        }
-    }
-    */
-// TODO: you still need to check if wait in weaken function really work
