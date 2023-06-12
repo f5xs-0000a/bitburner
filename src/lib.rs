@@ -223,7 +223,7 @@ pub async fn execute_command(
 
         Ok(AppMode::Donut) => crate::donut::donut(&ns).await,
 
-        Err(e) => ns.tprint(&format!("unable to process message:\n{:?}", e)),
+        Err(e) => ns.tprint(&format!("unable to process message:\n{}", e)),
     }
 }
 
