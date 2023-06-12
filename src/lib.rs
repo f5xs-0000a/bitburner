@@ -44,9 +44,7 @@ extern "C" {
     );
 
     #[wasm_bindgen(method)]
-    fn clearLog(
-        this: &NS,
-    );
+    fn clearLog(this: &NS);
 
     #[wasm_bindgen(method)]
     fn scan(
@@ -127,9 +125,7 @@ impl<'a> NsWrapper<'a> {
         self.0.lock().unwrap().sleep(millis).await;
     }
 
-    fn clear_log(
-        &self,
-    ) {
+    fn clear_log(&self) {
         self.0.lock().unwrap().clearLog();
     }
 

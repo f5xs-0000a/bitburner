@@ -196,23 +196,29 @@ fn scan_mode(
     for machine in network.iter() {
         match display_mode {
             Path => {
-                write!(&mut print_str, "\n");
+                write!(&mut print_str, "\n").unwrap();
                 for traversal in machine.get_traversal().iter() {
-                    write!(&mut print_str, "/{}", traversal);
+                    write!(&mut print_str, "/{}", traversal).unwrap();
                 }
-                write!(&mut print_str, "\n ");
+                write!(&mut print_str, "\n ").unwrap();
             },
 
             Cd => {
-                write!(&mut print_str, "\nhome; ");
+                write!(&mut print_str, "\nhome; ").unwrap();
                 for traversal in machine.get_traversal().iter().skip(1) {
-                    write!(&mut print_str, "connect {}; ", traversal);
+                    write!(&mut print_str, "connect {}; ", traversal).unwrap();
                 }
-                write!(&mut print_str, "\n ");
+                write!(&mut print_str, "\n ").unwrap();
             },
 
             Name => {
-                write!(&mut print_str, "{: <lnl$}   ", machine.get_hostname(), lnl = name_len);
+                write!(
+                    &mut print_str,
+                    "{: <lnl$}   ",
+                    machine.get_hostname(),
+                    lnl = name_len
+                )
+                .unwrap();
             },
         }
 
@@ -221,11 +227,17 @@ fn scan_mode(
             false => "Not Owned",
         };
 
+        let is_root = match machine.is_root(ns) {
+            true => "ROOT",
+            false => "user",
+        };
+
         writeln!(
             &mut print_str,
-            "   {: >lip$}   {: <lorg$}   {: >2}°   {: <lmm$}${}   {}   \
+            "   {}   {: >lip$}   {: <lorg$}   {: >2}°   {: <lmm$}${}   {}   \
              Hack Lvl{: >lhs$}   {: >lms$} Sec   {: >lcc$}-Core   {: >lrop$} \
              Ports",
+            is_root,
             machine.get_ip_address(),
             machine.get_organization_name(),
             machine.get_degree(),
