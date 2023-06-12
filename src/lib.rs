@@ -32,6 +32,23 @@ extern "C" {
     );
 
     #[wasm_bindgen(method)]
+    fn print(
+        this: &NS,
+        print: &str,
+    );
+
+    #[wasm_bindgen(method)]
+    async fn sleep(
+        this: &NS,
+        millis: i32,
+    );
+
+    #[wasm_bindgen(method)]
+    fn clearLog(
+        this: &NS,
+    );
+
+    #[wasm_bindgen(method)]
     fn scan(
         this: &NS,
         scan: Option<&str>,
@@ -94,6 +111,26 @@ impl<'a> NsWrapper<'a> {
         text: &str,
     ) {
         self.0.lock().unwrap().tprint(text);
+    }
+
+    fn print(
+        &self,
+        text: &str,
+    ) {
+        self.0.lock().unwrap().print(text);
+    }
+
+    async fn sleep(
+        &self,
+        millis: i32, // TODO: use Duration.
+    ) {
+        self.0.lock().unwrap().sleep(millis).await;
+    }
+
+    fn clear_log(
+        &self,
+    ) {
+        self.0.lock().unwrap().clearLog();
     }
 
     fn scan(
@@ -160,7 +197,7 @@ impl<'a> NsWrapper<'a> {
 }
 
 #[wasm_bindgen]
-pub fn execute_command(
+pub async fn execute_command(
     ns: &NS,
     args: Array,
 ) {
@@ -184,9 +221,7 @@ pub fn execute_command(
             scan_mode.execute(&ns)
         },
 
-        Ok(AppMode::Donut) => {
-            ns.tprint("Donut not yet implemented.");
-        },
+        Ok(AppMode::Donut) => crate::donut::donut(&ns).await,
 
         Err(e) => ns.tprint(&format!("unable to process message:\n{:?}", e)),
     }
