@@ -84,14 +84,14 @@ impl ScannedMachine {
     }
 }
 
-#[derive(Debug, Clone, ValueEnum)]
+#[derive(Debug, Copy, Clone, ValueEnum)]
 pub enum DisplayMode {
     Path,
     Cd,
     Name,
 }
 
-#[derive(Debug, Clone, ValueEnum)]
+#[derive(Debug, Copy, Clone, ValueEnum)]
 pub enum ExecMode {
     Scan,
     Nuke,
@@ -99,7 +99,7 @@ pub enum ExecMode {
     Sniff,
 }
 
-#[derive(Args, Debug)]
+#[derive(Args, Debug, Clone)]
 pub struct ScanMode {
     #[arg(long, short, value_enum, default_value_t = ExecMode::Scan)]
     exec: ExecMode,
@@ -121,7 +121,7 @@ impl ScanMode {
 
         match self.exec {
             Nuke => nuke_mode(ns, &mut *machines),
-            Scan => scan_mode(ns, &mut *machines),
+            Scan => scan_mode(ns, &mut *machines, self.display),
             _ => unimplemented!(),
         }
     }
@@ -179,7 +179,10 @@ fn get_longest_stuff<'a>(
 fn scan_mode(
     ns: &NsWrapper,
     mut network: &mut [ScannedMachine],
+    display_mode: DisplayMode,
 ) {
+    use DisplayMode::*;
+
     network.sort_unstable_by(|m1, m2| {
         m1.get_degree()
             .cmp(&m2.get_degree())
@@ -191,6 +194,28 @@ fn scan_mode(
 
     let mut print_str = "\n".to_owned();
     for machine in network.iter() {
+        match display_mode {
+            Path => {
+                write!(&mut print_str, "\n");
+                for traversal in machine.get_traversal().iter() {
+                    write!(&mut print_str, "/{}", traversal);
+                }
+                write!(&mut print_str, "\n ");
+            },
+
+            Cd => {
+                write!(&mut print_str, "\nhome; ");
+                for traversal in machine.get_traversal().iter().skip(1) {
+                    write!(&mut print_str, "connect {}; ", traversal);
+                }
+                write!(&mut print_str, "\n ");
+            },
+
+            Name => {
+                write!(&mut print_str, "{: <lnl$}   ", machine.get_hostname(), lnl = name_len);
+            },
+        }
+
         let player_owned = match machine.is_player_owned() {
             true => "  Owned  ",
             false => "Not Owned",
@@ -198,10 +223,9 @@ fn scan_mode(
 
         writeln!(
             &mut print_str,
-            "{: <lnl$}   {: >lip$}   {: <lorg$}   {: >2}°   {: <lmm$}${}   \
-             {}   Hack Lvl{: >lhs$}   {: >lms$} Sec   {: >lcc$}-Core   \
-             {: >lrop$} Ports",
-            machine.get_hostname(),
+            "   {: >lip$}   {: <lorg$}   {: >2}°   {: <lmm$}${}   {}   \
+             Hack Lvl{: >lhs$}   {: >lms$} Sec   {: >lcc$}-Core   {: >lrop$} \
+             Ports",
             machine.get_ip_address(),
             machine.get_organization_name(),
             machine.get_degree(),
@@ -212,7 +236,6 @@ fn scan_mode(
             machine.get_min_security(),
             machine.get_cpu_cores(),
             machine.get_required_open_ports(),
-            lnl = name_len,
             lip = ip_len,
             lorg = org_len,
             lmm = mm_len - machine.get_max_money().max(1).ilog10() as usize - 2,
