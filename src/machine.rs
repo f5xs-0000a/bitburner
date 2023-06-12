@@ -108,7 +108,7 @@ impl Machine {
         hostname: String,
     ) -> Machine {
         let mut traversal = self.traversal.clone();
-        traversal.push(self.get_hostname().to_owned());
+        traversal.push(hostname.clone());
 
         let mut retval = Machine {
             traversal,
