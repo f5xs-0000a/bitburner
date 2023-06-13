@@ -38,6 +38,12 @@ extern "C" {
     );
 
     #[wasm_bindgen(method)]
+    fn ls(
+        this: &NS,
+        machine: &str,
+    ) -> Vec<JsValue>;
+
+    #[wasm_bindgen(method)]
     async fn sleep(
         this: &NS,
         millis: i32,
@@ -119,6 +125,13 @@ impl<'a> NsWrapper<'a> {
         text: &str,
     ) {
         self.0.lock().unwrap().print(text);
+    }
+
+    fn ls(
+        &self,
+        hostname: &str
+    ) -> Vec<String> {
+        self.0.lock().unwrap().ls(hostname).into_iter().map(|x| x.as_string().unwrap()).collect::<Vec<_>>()
     }
 
     async fn sleep(

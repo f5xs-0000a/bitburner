@@ -117,7 +117,8 @@ impl ScanMode {
         match self.exec {
             Nuke => nuke_mode(ns, &mut *machines, self.display),
             Scan => scan_mode(ns, &mut *machines, self.display),
-            _ => unimplemented!(),
+            Sniff => sniff_mode(ns, &mut *machines, self.display),
+            _ => {},
         }
     }
 }
@@ -354,6 +355,55 @@ fn nuke_mode(
             lrop = rop_len,
         )
         .unwrap();
+    }
+
+    ns.tprint(&*print_str);
+}
+
+fn sniff_mode(
+    ns: &NsWrapper,
+    network: &mut [ScannedMachine],
+    display_mode: DisplayMode,
+) {
+    use DisplayMode::*;
+
+    let mut print_str = "\n".to_owned();
+    for machine in network.iter() {
+        if machine.is_player_owned() {
+            continue;
+        }
+
+        let files = ns.ls(machine.get_hostname());
+
+        if files.is_empty() {
+            continue;
+        }
+
+        match display_mode {
+            Path => {
+                write!(&mut print_str, "\n").unwrap();
+                for traversal in machine.get_traversal().iter() {
+                    write!(&mut print_str, "/{}", traversal).unwrap();
+                }
+                write!(&mut print_str, "\n").unwrap();
+            },
+
+            Cd => {
+                write!(&mut print_str, "\nhome; ").unwrap();
+                for traversal in machine.get_traversal().iter().skip(1) {
+                    write!(&mut print_str, "connect {}; ", traversal).unwrap();
+                }
+                write!(&mut print_str, "\n").unwrap();
+            },
+
+            Name => {
+                writeln!(&mut print_str, "\n{}", machine.get_hostname()).unwrap();
+            },
+        }
+
+        for filename in files.into_iter() {
+            writeln!(&mut print_str, "- {}", filename).unwrap();
+        }
     }
 
     ns.tprint(&*print_str);
