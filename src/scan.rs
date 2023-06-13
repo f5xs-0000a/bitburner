@@ -46,18 +46,6 @@ enum NukeResult {
     NotNuked,
 }
 
-impl NukeResult {
-    fn to_stat_column_char(&self) -> char {
-        use NukeResult::*;
-
-        match self {
-            JustNuked => '.',
-            WasNuked => '!',
-            NotNuked => ' ',
-        }
-    }
-}
-
 impl ScannedMachine {
     fn nuke(
         &mut self,
@@ -65,8 +53,15 @@ impl ScannedMachine {
     ) -> NukeResult {
         use NukeResult::*;
 
+        if self.get_hostname() == "crushfitness" {
+            crate::alert(&format!("{:?}", self));
+        }
         if self.is_backdoored(ns) {
             return WasNuked;
+        }
+
+        if ns.get_player_hacking_level() < self.get_min_hacking_skill() {
+            return NotNuked;
         }
 
         self.run_brute_ssh(ns);
@@ -120,7 +115,7 @@ impl ScanMode {
             .collect::<Vec<_>>();
 
         match self.exec {
-            Nuke => nuke_mode(ns, &mut *machines),
+            Nuke => nuke_mode(ns, &mut *machines, self.display),
             Scan => scan_mode(ns, &mut *machines, self.display),
             _ => unimplemented!(),
         }
@@ -265,7 +260,11 @@ fn scan_mode(
 fn nuke_mode(
     ns: &NsWrapper,
     network: &mut [ScannedMachine],
+    display_mode: DisplayMode,
 ) {
+    use DisplayMode::*;
+    use NukeResult::*;
+
     let mut nuked_machines = network
         .iter_mut()
         .map(|m| {
@@ -280,20 +279,79 @@ fn nuke_mode(
             .then(m1.get_hostname().cmp(&m2.get_hostname()))
     });
 
-    let longest_name_len = nuked_machines
-        .iter()
-        .map(|(m, _)| m.get_hostname().len())
-        .max()
-        .unwrap_or(0);
+    let (name_len, ip_len, org_len, mm_len, hs_len, sec_len, cc_len, rop_len) =
+        get_longest_stuff(nuked_machines.iter().map(|m| &**m.0));
 
-    let mut print_str = String::new();
-    for (machine, status) in nuked_machines.into_iter() {
+    let mut print_str = "\n".to_owned();
+    for (machine, status) in nuked_machines.iter() {
+        match display_mode {
+            Path => {
+                write!(&mut print_str, "\n").unwrap();
+                for traversal in machine.get_traversal().iter() {
+                    write!(&mut print_str, "/{}", traversal).unwrap();
+                }
+                write!(&mut print_str, "\n ").unwrap();
+            },
+
+            Cd => {
+                write!(&mut print_str, "\nhome; ").unwrap();
+                for traversal in machine.get_traversal().iter().skip(1) {
+                    write!(&mut print_str, "connect {}; ", traversal).unwrap();
+                }
+                write!(&mut print_str, "\n ").unwrap();
+            },
+
+            Name => {
+                write!(
+                    &mut print_str,
+                    "{: <lnl$}   ",
+                    machine.get_hostname(),
+                    lnl = name_len
+                )
+                .unwrap();
+            },
+        }
+
+        let player_owned = match machine.is_player_owned() {
+            true => "  Owned  ",
+            false => "Not Owned",
+        };
+
+        let is_root = match machine.is_root(ns) {
+            true => "ROOT",
+            false => "user",
+        };
+
+        let nuke_mode = match status {
+            WasNuked => "nuked",
+            JustNuked => "NUKED",
+            NotNuked => "     ",
+        };
+
         writeln!(
             &mut print_str,
-            "{: <lnl$}  {}",
-            machine.get_hostname(),
-            status.to_stat_column_char(),
-            lnl = longest_name_len,
+            "   {}   {}   {: >lip$}   {: <lorg$}   {: >2}°   {: <lmm$}${}   \
+             {}   Hack Lvl{: >lhs$}   {: >lms$} Sec   {: >lcc$}-Core   {: \
+             >lrop$} Ports",
+            is_root,
+            nuke_mode,
+            machine.get_ip_address(),
+            machine.get_organization_name(),
+            machine.get_degree(),
+            "",
+            machine.get_max_money(),
+            player_owned,
+            machine.get_min_hacking_skill(),
+            machine.get_min_security(),
+            machine.get_cpu_cores(),
+            machine.get_required_open_ports(),
+            lip = ip_len,
+            lorg = org_len,
+            lmm = mm_len - machine.get_max_money().max(1).ilog10() as usize - 2,
+            lhs = hs_len,
+            lms = sec_len,
+            lcc = cc_len,
+            lrop = rop_len,
         )
         .unwrap();
     }

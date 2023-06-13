@@ -94,6 +94,9 @@ extern "C" {
         host: Option<&str>,
     ) -> Server;
 
+    #[wasm_bindgen(method)]
+    fn getHackingLevel(this: &NS) -> i32;
+
     pub type Server;
 }
 
@@ -189,6 +192,10 @@ impl<'a> NsWrapper<'a> {
         hostname: &str,
     ) -> bool {
         self.0.lock().unwrap().sqlinject(hostname).is_ok()
+    }
+
+    fn get_player_hacking_level(&self) -> usize {
+        self.0.lock().unwrap().getHackingLevel() as usize
     }
 }
 
