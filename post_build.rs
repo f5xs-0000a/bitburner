@@ -205,7 +205,7 @@ fn main() {
 
     let server = server.incoming().next().unwrap();
     let mut websocket =
-        tungstenite::accept_hdr(stream.unwrap(), callback).unwrap();
+        tungstenite::accept_hdr(server.unwrap(), callback).unwrap();
 
     eprintln!("Listener found. Uploading...");
     let message = serde_json::json!({
