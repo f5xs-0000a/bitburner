@@ -3,9 +3,18 @@ use std::collections::VecDeque;
 use wasm_bindgen::JsValue;
 
 use crate::{
+    netscript::NsWrapper,
     utils::get_attribute,
-    NsWrapper,
 };
+
+const GROW_TIME_MUL: f64 = 3.2;
+const WEAKEN_TIME_MUL: f64 = 4.;
+
+const WEAKEN_SECURITY_DECREASE_THOUSANDTHS: usize = 50;
+const HACK_SECURITY_INCREASE_THOUSANDTHS: usize = 2;
+const GROW_SECURITY_INCREASE_THOUSANDTHS: usize = 4;
+
+const EXEC_MEMORY_USAGE_HUNDREDTHS: usize = 175;
 
 #[derive(Clone, Debug)]
 pub struct Machine {
@@ -149,6 +158,10 @@ impl Machine {
         self.min_security
     }
 
+    pub fn get_min_security_thousandths(&self) -> usize {
+        (self.get_min_security() * 1000.).round() as usize
+    }
+
     pub fn get_cpu_cores(&self) -> usize {
         self.cpu_cores
     }
@@ -225,6 +238,101 @@ impl Machine {
         ns: &NsWrapper,
     ) -> bool {
         ns.nuke(self.get_hostname())
+    }
+
+    pub fn get_hack_time(
+        &self,
+        ns: &NsWrapper,
+    ) -> f64 {
+        ns.get_hack_time(self.get_hostname())
+    }
+
+    pub fn get_grow_time(
+        &self,
+        ns: &NsWrapper,
+    ) -> f64 {
+        self.get_hack_time(ns) * GROW_TIME_MUL
+    }
+
+    pub fn get_weaken_time(
+        &self,
+        ns: &NsWrapper,
+    ) -> f64 {
+        self.get_hack_time(ns) * WEAKEN_TIME_MUL
+    }
+
+    pub fn get_max_gb_ram(
+        &self,
+        ns: &NsWrapper,
+    ) -> f64 {
+        ns.get_server_max_ram(self.get_hostname())
+    }
+
+    pub fn get_used_gb_ram(
+        &self,
+        ns: &NsWrapper,
+    ) -> f64 {
+        ns.get_server_used_ram(self.get_hostname())
+    }
+
+    pub fn get_max_gb_ram_hundredths(
+        &self,
+        ns: &NsWrapper,
+    ) -> usize {
+        (self.get_max_gb_ram(ns) * 100.).round() as usize
+    }
+
+    pub fn get_used_gb_ram_hundredts(
+        &self,
+        ns: &NsWrapper,
+    ) -> usize {
+        (self.get_used_gb_ram(ns) * 100.).round() as usize
+    }
+
+    pub fn get_free_ram_hundredths(
+        &self,
+        ns: &NsWrapper,
+    ) -> usize {
+        self.get_max_gb_ram_hundredths(ns) - self.get_used_gb_ram_hundredts(ns)
+    }
+
+    pub fn get_security_level(
+        &self,
+        ns: &NsWrapper,
+    ) -> f64 {
+        ns.get_server_security_level(self.get_hostname())
+    }
+
+    pub fn get_security_level_thousandths(
+        &self,
+        ns: &NsWrapper,
+    ) -> usize {
+        (self.get_security_level(ns) * 1000.).round() as usize
+    }
+
+    /// Returns the number of `weaken()` threads
+    pub fn get_weaken_threads_to_reduce(
+        &self,
+        ns: &NsWrapper,
+    ) -> usize {
+        let security_left = self.get_security_level_thousandths(ns)
+            - self.get_min_security_thousandths();
+        let mut weaken_threads_left =
+            security_left / WEAKEN_SECURITY_DECREASE_THOUSANDTHS;
+
+        // add one for remainders
+        if 0 < security_left % WEAKEN_SECURITY_DECREASE_THOUSANDTHS {
+            weaken_threads_left += 1;
+        }
+
+        weaken_threads_left
+    }
+
+    pub fn get_threads_left(
+        &self,
+        ns: &NsWrapper,
+    ) -> usize {
+        self.get_free_ram_hundredths(ns) / EXEC_MEMORY_USAGE_HUNDREDTHS
     }
 }
 

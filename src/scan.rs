@@ -14,7 +14,7 @@ use crate::{
         get_machines,
         Machine,
     },
-    NsWrapper,
+    netscript::NsWrapper,
 };
 
 #[derive(Debug, Clone)]
@@ -53,10 +53,7 @@ impl ScannedMachine {
     ) -> NukeResult {
         use NukeResult::*;
 
-        if self.get_hostname() == "crushfitness" {
-            crate::alert(&format!("{:?}", self));
-        }
-        if self.is_backdoored(ns) {
+        if self.is_root(ns) {
             return WasNuked;
         }
 
@@ -118,7 +115,7 @@ impl ScanMode {
             Nuke => nuke_mode(ns, &mut *machines, self.display),
             Scan => scan_mode(ns, &mut *machines, self.display),
             Sniff => sniff_mode(ns, &mut *machines, self.display),
-            _ => {},
+            Backdoor => backdoor_mode(ns, &*machines),
         }
     }
 }
@@ -174,7 +171,7 @@ fn get_longest_stuff<'a>(
 
 fn scan_mode(
     ns: &NsWrapper,
-    mut network: &mut [ScannedMachine],
+    network: &mut [ScannedMachine],
     display_mode: DisplayMode,
 ) {
     use DisplayMode::*;
@@ -397,7 +394,8 @@ fn sniff_mode(
             },
 
             Name => {
-                writeln!(&mut print_str, "\n{}", machine.get_hostname()).unwrap();
+                writeln!(&mut print_str, "\n{}", machine.get_hostname())
+                    .unwrap();
             },
         }
 
@@ -407,4 +405,37 @@ fn sniff_mode(
     }
 
     ns.tprint(&*print_str);
+}
+
+fn backdoor_mode(
+    ns: &NsWrapper,
+    network: &[ScannedMachine],
+) {
+    let mut print_str = "\n".to_owned();
+    for machine in network.iter() {
+        if machine.is_player_owned() {
+            continue;
+        }
+
+        if machine.is_backdoored(ns) {
+            continue;
+        }
+
+        if ns.get_player_hacking_level() < machine.get_min_hacking_skill() {
+            continue;
+        }
+
+        write!(&mut print_str, "\nhome; ").unwrap();
+        for traversal in machine.get_traversal().iter().skip(1) {
+            write!(&mut print_str, "connect {}; ", traversal).unwrap();
+        }
+        writeln!(&mut print_str, "backdoor;").unwrap();
+    }
+
+    if print_str == "\n" {
+        ns.tprint("No machines to backdoor.");
+    }
+    else {
+        ns.tprint(&*print_str);
+    }
 }
