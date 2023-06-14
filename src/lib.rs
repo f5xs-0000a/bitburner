@@ -11,9 +11,7 @@ use clap::{
 };
 use js_sys::Array;
 // TODO: don't use glob unless necessary.
-use wasm_bindgen::{
-    prelude::*,
-};
+use wasm_bindgen::prelude::*;
 
 use crate::scan::ScanMode;
 
@@ -71,4 +69,18 @@ pub async fn execute_command(
 
         Err(e) => ns.tprint(&format!("unable to process message:\n{}", e)),
     }
+}
+
+#[macro_export]
+macro_rules! debug {
+    ($ns: expr) => {
+        //crate::netscript::alert(&*format!("{}:{}", file!(), line!()));
+        $ns.tprint(&*format!("{}:{}", file!(), line!()));
+    };
+    ($ns: expr, $($arg:tt)*) => {
+        let mut first = format!("{}:{}\n", file!(), line!());
+        first += &*format!($($arg)*);
+        //crate::netscript::alert(&*first);
+        $ns.tprint(&*first);
+    };
 }

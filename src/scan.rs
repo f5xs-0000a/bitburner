@@ -122,7 +122,7 @@ impl ScanMode {
 
 // hostname, ip address, organization, max money hacking skill, min security,
 // cpu cores, required open ports
-fn get_longest_stuff<'a>(
+pub fn get_longest_stuff<'a>(
     iter: impl Iterator<Item = &'a Machine>
 ) -> (usize, usize, usize, usize, usize, usize, usize, usize) {
     let mut hostname = 0;

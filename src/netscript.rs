@@ -10,7 +10,7 @@ use wasm_bindgen::{
 #[wasm_bindgen]
 extern "C" {
     #[wasm_bindgen]
-    fn alert(msg: &str);
+    pub fn alert(msg: &str);
 
     pub type NS;
 
@@ -50,7 +50,7 @@ extern "C" {
     #[wasm_bindgen(method)]
     fn getScriptName(this: &NS) -> JsValue;
 
-    #[wasm_bindgen(method)]
+    #[wasm_bindgen(method, variadic)]
     fn exec(
         this: &NS,
         script_name: &str,
@@ -346,7 +346,7 @@ impl<'a> NsWrapper<'a> {
         &self,
         hostname: &str,
     ) -> f64 {
-        self.0.lock().unwrap().getServerMaxRam(hostname)
+        self.0.lock().unwrap().getServerUsedRam(hostname)
     }
 
     pub fn get_server_security_level(

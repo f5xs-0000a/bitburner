@@ -17,20 +17,14 @@ use crate::{
 const GRACE_PERIOD_MILLIS: usize = 10;
 const RESERVATION_RATE: f64 = 0.9;
 
-#[derive(Clone, Copy, Debug, PartialEq, PartialOrd)]
-pub struct NSTime(R64);
+async fn sleep_until(
+    ns: &NsWrapper<'_>,
+    time: f64,
+) {
+    let now = Date::now();
 
-impl NSTime {
-    pub fn time_until(&self) -> NSTime {
-        NSTime(R64::from_inner(Date::now() - self.0.into_inner()))
-    }
-
-    pub async fn sleep_until(
-        &self,
-        ns: &NsWrapper<'_>,
-    ) {
-        ns.sleep(self.time_until().0.into_inner().round() as i32)
-            .await;
+    if now < time {
+        ns.sleep((now - time) as i32).await;
     }
 }
 
@@ -46,7 +40,7 @@ pub struct HGWJob {
     job_type: JobType,
     running_machine: String,
     pid: usize,
-    end_time: NSTime,
+    end_time: f64,
 }
 
 impl PartialOrd for HGWJob {
@@ -54,7 +48,7 @@ impl PartialOrd for HGWJob {
         &self,
         other: &Self,
     ) -> Option<Ordering> {
-        self.end_time.0.partial_cmp(&other.end_time.0)
+        self.end_time.partial_cmp(&other.end_time)
     }
 }
 
@@ -63,7 +57,7 @@ impl Ord for HGWJob {
         &self,
         other: &Self,
     ) -> Ordering {
-        self.end_time.0.cmp(&other.end_time.0)
+        self.partial_cmp(&other).unwrap()
     }
 }
 
@@ -72,7 +66,7 @@ impl PartialEq for HGWJob {
         &self,
         other: &Self,
     ) -> bool {
-        self.end_time.0.eq(&other.end_time.0)
+        self.end_time.eq(&other.end_time)
     }
 }
 
@@ -84,14 +78,13 @@ impl Eq for HGWJob {
 impl HGWJob {
     fn spawn_common(
         ns: &NsWrapper,
+        script_name: &str,
         hostname: &str,
         threads: usize,
         target: &str,
-        command: &str,
     ) -> Option<usize> {
         assert!(0 < threads);
-        let script_name = ns.get_script_name();
-        ns.exec(&*script_name, hostname, Some(threads), &[command, target])
+        ns.exec(script_name, hostname, Some(threads), &[target])
     }
 
     pub fn grow(
@@ -102,10 +95,10 @@ impl HGWJob {
     ) -> HGWJob {
         let pid = HGWJob::spawn_common(
             ns,
+            "child_grow.js",
             hacker.get_hostname(),
             threads,
             target.get_hostname(),
-            "grow",
         )
         .unwrap();
 
@@ -113,7 +106,7 @@ impl HGWJob {
             job_type: JobType::Grow,
             running_machine: hacker.get_hostname().to_owned(),
             pid,
-            end_time: NSTime(R64::from_inner(target.get_grow_time(ns))),
+            end_time: Date::now() + target.get_grow_time(ns),
         }
     }
 
@@ -125,10 +118,10 @@ impl HGWJob {
     ) -> HGWJob {
         let pid = HGWJob::spawn_common(
             ns,
+            "child_weaken.js",
             hacker.get_hostname(),
             threads,
             target.get_hostname(),
-            "weaken",
         )
         .unwrap();
 
@@ -136,7 +129,7 @@ impl HGWJob {
             job_type: JobType::Weaken,
             running_machine: hacker.get_hostname().to_owned(),
             pid,
-            end_time: NSTime(R64::from_inner(target.get_weaken_time(ns))),
+            end_time: Date::now() + target.get_weaken_time(ns),
         }
     }
 
@@ -148,10 +141,10 @@ impl HGWJob {
     ) -> HGWJob {
         let pid = HGWJob::spawn_common(
             ns,
+            "child_hack.js",
             hacker.get_hostname(),
             threads,
             target.get_hostname(),
-            "hack",
         )
         .unwrap();
 
@@ -159,7 +152,7 @@ impl HGWJob {
             job_type: JobType::Hack,
             running_machine: hacker.get_hostname().to_owned(),
             pid,
-            end_time: NSTime(R64::from_inner(target.get_hack_time(ns))),
+            end_time: Date::now() + target.get_hack_time(ns),
         }
     }
 
@@ -171,7 +164,7 @@ impl HGWJob {
         self.pid
     }
 
-    pub fn get_end_time(&self) -> NSTime {
+    pub fn get_end_time(&self) -> f64 {
         self.end_time
     }
 
@@ -179,7 +172,7 @@ impl HGWJob {
         &self,
         ns: &NsWrapper<'_>,
     ) {
-        self.end_time.sleep_until(ns).await;
+        sleep_until(ns, self.end_time).await;
 
         while ns.is_running(self.get_pid()) {
             ns.sleep(GRACE_PERIOD_MILLIS as i32).await;
@@ -199,6 +192,8 @@ impl TotalWeakener {
     pub fn new(ns: &NsWrapper) -> TotalWeakener {
         let machines = crate::machine::get_machines(ns);
 
+        let current_hacking_level = ns.get_player_hacking_level();
+
         let hackers = machines
             .iter()
             .filter(|m| m.is_root(ns))
@@ -216,6 +211,8 @@ impl TotalWeakener {
             .filter(|m| !m.is_player_owned())
             // rooted
             .filter(|m| m.is_root(ns))
+            // has a required hacking level lower than what we have
+            .filter(|m| m.get_min_hacking_skill() <= current_hacking_level)
             // can be filled with money
             .filter(|m| 0 < m.get_max_money())
             .map(|m| {
@@ -239,6 +236,36 @@ impl TotalWeakener {
         }
     }
 
+    pub fn display_targets(
+        &self,
+        ns: &NsWrapper,
+    ) {
+        let mut output = "\nTargets to weaken:\n".to_owned();
+
+        let (hostname_len, ..) =
+            crate::scan::get_longest_stuff(self.targets.iter().map(|(m, _)| m));
+
+        // print header
+        output += "Hostname";
+        for _ in "Hostname".len() .. hostname_len {
+            output += " ";
+        }
+
+        output += "  Duration  Threads Left\n";
+
+        for (machine, threads_left) in self.targets.iter() {
+            output += &format!(
+                "{: <hnl$}  {:>7.2}s  {:^12}\n",
+                machine.get_hostname(),
+                machine.get_weaken_time(ns) / 1000.,
+                threads_left,
+                hnl = hostname_len
+            );
+        }
+
+        ns.tprint(&output);
+    }
+
     pub async fn run(
         &mut self,
         ns: &NsWrapper<'_>,
@@ -250,7 +277,16 @@ impl TotalWeakener {
         // the progression goes from left to right
         let mut last_successful_hacker_idx = Some(self.current_hacker_index);
         while 0 < self.targets.last().unwrap().1 {
+            crate::debug!(
+                ns,
+                "\nHacker idx: {}\nTarget idx: {}",
+                self.current_hacker_index,
+                self.current_target_index
+            );
             let cur_hacker_idx = self.current_hacker_index;
+
+            crate::debug!(ns, "Went over the loop.");
+            ns.sleep(1000).await;
 
             // make sure to record the hacker's index that spawned a weaken
             // process successfully
@@ -263,10 +299,12 @@ impl TotalWeakener {
             else if last_successful_hacker_idx
                 == Some(self.current_hacker_index)
             {
+                crate::debug!(ns, "Sleeping until next job finish.");
                 self.wait_for_next_job_finish(ns).await;
             }
         }
 
+        crate::debug!(ns, "Waiting until the end...");
         self.wait_for_end(ns).await;
     }
 
@@ -281,10 +319,13 @@ impl TotalWeakener {
         let (current_target, ref mut current_threads_remaining) =
             self.targets.get_mut(self.current_target_index).unwrap();
 
+        crate::debug!(ns, "Threads remaining: {}", current_threads_remaining);
+
         // increment the pointer if there are no threads required for this
         // machine
         if *current_threads_remaining == 0 {
             self.current_target_index += 1;
+            crate::debug!(ns, "Moved target index to {}", self.current_target_index);
             return false;
         }
 
@@ -306,7 +347,7 @@ impl TotalWeakener {
         // - still follows the reservation rate, to an extent
         // - is not larger than weaken_threads_left
         // - is at least 1
-        let mut threads_to_use = current_target.get_threads_left(ns);
+        let mut threads_to_use = current_hacker.get_threads_left(ns);
         threads_to_use *= (RESERVATION_RATE * 1000.) as usize;
         threads_to_use /= 1000;
         threads_to_use = threads_to_use.min(*current_threads_remaining);
@@ -340,9 +381,9 @@ impl TotalWeakener {
             };
 
             if let Some((best_idx, best_jobs)) = best.as_mut() {
-                let this_job_end_time = jobs.peek().unwrap().get_end_time().0;
+                let this_job_end_time = jobs.peek().unwrap().get_end_time();
                 let best_job_end_time =
-                    best_jobs.peek().unwrap().get_end_time().0;
+                    best_jobs.peek().unwrap().get_end_time();
 
                 // wait for next job
                 if is_next && this_job_end_time < best_job_end_time {
@@ -384,7 +425,8 @@ impl TotalWeakener {
 
 pub async fn auto_hack(ns: &NsWrapper<'_>) {
     let mut weakener = TotalWeakener::new(ns);
-    ns.tprint("Weakening machines...");
+    weakener.display_targets(ns);
+
     weakener.run(ns).await;
     ns.tprint("Machines weakened.");
 }
