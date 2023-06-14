@@ -226,6 +226,7 @@ impl TotalWeakener {
             m1.get_weaken_time(ns)
                 .partial_cmp(&m2.get_weaken_time(ns))
                 .unwrap()
+                .reverse()
         });
 
         TotalWeakener {
@@ -275,7 +276,8 @@ impl TotalWeakener {
         }
 
         // the progression goes from left to right
-        let mut last_successful_hacker_idx = Some(self.current_hacker_index);
+        let mut last_successful_pair =
+            Some((self.current_hacker_index, self.current_target_index));
         while 0 < self.targets.last().unwrap().1 {
             crate::debug!(
                 ns,
@@ -283,21 +285,44 @@ impl TotalWeakener {
                 self.current_hacker_index,
                 self.current_target_index
             );
+
             let cur_hacker_idx = self.current_hacker_index;
+            let cur_target_threads_rem = self
+                .targets
+                .get_mut(self.current_target_index)
+                .unwrap()
+                .1
+                .clone();
+            let cur_target_idx = self.current_target_index;
 
             crate::debug!(ns, "Went over the loop.");
             ns.sleep(1000).await;
+            self.step(ns).await;
 
-            // make sure to record the hacker's index that spawned a weaken
-            // process successfully
-            if self.step(ns).await {
-                last_successful_hacker_idx = Some(cur_hacker_idx);
+            let mut success = false;
+
+            // if the target index incremented, thread spawning is a success
+            if self.current_target_index != cur_target_idx {
+                success = true;
             }
-            // at this point, step() has incremented the current hacker index.
-            // that means that this current hacker index is not the same when
-            // we're comparing.
-            else if last_successful_hacker_idx
-                == Some(self.current_hacker_index)
+
+            // if the number of threads reduced, thread spawning is a success
+            if self.targets.get(cur_target_idx).unwrap().1
+                == cur_target_threads_rem
+            {
+                success = true
+            }
+
+            if success {
+                last_successful_pair = Some((
+                    self.current_hacker_index,
+                    self.current_target_index,
+                ));
+            }
+            // at this point, step() has incremented the current hacker all the
+            // way around. we have to wait until the next hacker is available.
+            else if last_successful_pair
+                != Some((self.current_hacker_index, self.current_target_index))
             {
                 crate::debug!(ns, "Sleeping until next job finish.");
                 self.wait_for_next_job_finish(ns).await;
@@ -313,7 +338,7 @@ impl TotalWeakener {
     async fn step(
         &mut self,
         ns: &NsWrapper<'_>,
-    ) -> bool {
+    ) {
         let (current_hacker, ref mut current_jobs) =
             self.hackers.get_mut(self.current_hacker_index).unwrap();
         let (current_target, ref mut current_threads_remaining) =
@@ -325,8 +350,12 @@ impl TotalWeakener {
         // machine
         if *current_threads_remaining == 0 {
             self.current_target_index += 1;
-            crate::debug!(ns, "Moved target index to {}", self.current_target_index);
-            return false;
+            crate::debug!(
+                ns,
+                "Moved target index to {}",
+                self.current_target_index
+            );
+            return;
         }
 
         // not enough RAM on this machine. get to the next one.
@@ -337,10 +366,17 @@ impl TotalWeakener {
             mr
         };
 
+        // fail because we don't have enough memory
         if current_hacker.get_free_ram_hundredths(ns) < max_ram {
+            crate::debug!(
+                ns,
+                "FREE RAM: {}        MAX RAM: {}",
+                current_hacker.get_free_ram_hundredths(ns),
+                max_ram
+            );
             self.current_hacker_index =
                 (self.current_hacker_index + 1) % self.hackers.len();
-            return false;
+            return;
         }
 
         // make sure that the number of threads to use
@@ -359,9 +395,6 @@ impl TotalWeakener {
         current_jobs.push(job);
 
         *current_threads_remaining -= threads_to_use;
-
-        // spawning happened successfully
-        true
     }
 
     async fn wait_until_next_or_end_finish(
@@ -380,7 +413,7 @@ impl TotalWeakener {
                 None => continue,
             };
 
-            if let Some((best_idx, best_jobs)) = best.as_mut() {
+            if let Some((ref mut best_idx, ref mut best_jobs)) = best.as_mut() {
                 let this_job_end_time = jobs.peek().unwrap().get_end_time();
                 let best_job_end_time =
                     best_jobs.peek().unwrap().get_end_time();
