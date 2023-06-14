@@ -279,13 +279,6 @@ impl TotalWeakener {
         let mut last_successful_pair =
             Some((self.current_hacker_index, self.current_target_index));
         while 0 < self.targets.last().unwrap().1 {
-            crate::debug!(
-                ns,
-                "\nHacker idx: {}\nTarget idx: {}",
-                self.current_hacker_index,
-                self.current_target_index
-            );
-
             let cur_hacker_idx = self.current_hacker_index;
             let cur_target_threads_rem = self
                 .targets
@@ -295,8 +288,6 @@ impl TotalWeakener {
                 .clone();
             let cur_target_idx = self.current_target_index;
 
-            crate::debug!(ns, "Went over the loop.");
-            ns.sleep(1000).await;
             self.step(ns).await;
 
             let mut success = false;
@@ -324,12 +315,10 @@ impl TotalWeakener {
             else if last_successful_pair
                 != Some((self.current_hacker_index, self.current_target_index))
             {
-                crate::debug!(ns, "Sleeping until next job finish.");
                 self.wait_for_next_job_finish(ns).await;
             }
         }
 
-        crate::debug!(ns, "Waiting until the end...");
         self.wait_for_end(ns).await;
     }
 
@@ -344,17 +333,10 @@ impl TotalWeakener {
         let (current_target, ref mut current_threads_remaining) =
             self.targets.get_mut(self.current_target_index).unwrap();
 
-        crate::debug!(ns, "Threads remaining: {}", current_threads_remaining);
-
         // increment the pointer if there are no threads required for this
         // machine
         if *current_threads_remaining == 0 {
             self.current_target_index += 1;
-            crate::debug!(
-                ns,
-                "Moved target index to {}",
-                self.current_target_index
-            );
             return;
         }
 
@@ -368,12 +350,6 @@ impl TotalWeakener {
 
         // fail because we don't have enough memory
         if current_hacker.get_free_ram_hundredths(ns) < max_ram {
-            crate::debug!(
-                ns,
-                "FREE RAM: {}        MAX RAM: {}",
-                current_hacker.get_free_ram_hundredths(ns),
-                max_ram
-            );
             self.current_hacker_index =
                 (self.current_hacker_index + 1) % self.hackers.len();
             return;
