@@ -3,6 +3,7 @@ mod machine;
 mod netscript;
 mod scan;
 mod utils;
+//mod range_set;
 
 use clap::{
     error::ErrorKind::DisplayHelp,

@@ -152,6 +152,18 @@ extern "C" {
         host: &str,
     ) -> f64;
 
+    #[wasm_bindgen(method)]
+    fn hackAnalyze(
+        this: &NS,
+        host: &str,
+    ) -> f64;
+
+    #[wasm_bindgen(method)]
+    fn hackAnalyzeChance(
+        this: &NS,
+        host: &str,
+    ) -> f64;
+
     pub type Server;
 
     pub type Date;
@@ -354,5 +366,19 @@ impl<'a> NsWrapper<'a> {
         hostname: &str,
     ) -> f64 {
         self.0.lock().unwrap().getServerSecurityLevel(hostname)
+    }
+
+    pub fn hack_analyze(
+        &self,
+        hostname: &str,
+    ) -> f64 {
+        self.0.lock().unwrap().hackAnalyze(hostname)
+    }
+
+    pub fn hack_analyze_chance(
+        &self,
+        hostname: &str,
+    ) -> f64 {
+        self.0.lock().unwrap().hackAnalyzeChance(hostname)
     }
 }

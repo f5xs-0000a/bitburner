@@ -1,4 +1,11 @@
-use core::cmp::Ordering;
+use core::{
+    cmp::Ordering,
+    mem::drop,
+};
+use std::{
+    collections::HashMap,
+    sync::Arc,
+};
 
 use binary_heap_plus::{
     BinaryHeap,
@@ -14,17 +21,22 @@ use crate::{
     },
 };
 
-const GRACE_PERIOD_MILLIS: usize = 10;
+const REFRESH_GRACE_PERIOD_MILLIS: usize = 10;
 const RESERVATION_RATE: f64 = 0.9;
+const BATCH_GRACE_PERIOD_MILLIS: usize = 100;
 
 async fn sleep_until(
     ns: &NsWrapper<'_>,
     time: f64,
-) {
+) -> bool {
     let now = Date::now();
 
     if now < time {
         ns.sleep((now - time) as i32).await;
+        true
+    }
+    else {
+        false
     }
 }
 
@@ -175,7 +187,7 @@ impl HGWJob {
         sleep_until(ns, self.end_time).await;
 
         while ns.is_running(self.get_pid()) {
-            ns.sleep(GRACE_PERIOD_MILLIS as i32).await;
+            ns.sleep(REFRESH_GRACE_PERIOD_MILLIS as i32).await;
         }
     }
 }
@@ -189,23 +201,21 @@ struct TotalWeakener {
 }
 
 impl TotalWeakener {
-    pub fn new(ns: &NsWrapper) -> TotalWeakener {
-        let machines = crate::machine::get_machines(ns);
-
+    pub fn new(
+        ns: &NsWrapper,
+        machines: &[Machine],
+    ) -> TotalWeakener {
         let current_hacking_level = ns.get_player_hacking_level();
 
         let hackers = machines
             .iter()
             .filter(|m| m.is_root(ns))
-            // we're going to be using just home for now
-            // TODO: remove this
-            .filter(|m| m.get_hostname() == "home")
             .cloned()
             .map(|m| (m, BinaryHeap::new_min()))
             .collect::<Vec<_>>();
 
         let mut targets = machines
-            .into_iter()
+            .iter()
             // hack only machines that are
             // not owned by the player
             .filter(|m| !m.is_player_owned())
@@ -221,6 +231,7 @@ impl TotalWeakener {
             })
             // and needs to be weakened
             .filter(|(_, count)| 0 < *count)
+            .map(|(m, count)| (m.clone(), count))
             .collect::<Vec<_>>();
         targets.sort_unstable_by(|(m1, _), (m2, _)| {
             m1.get_weaken_time(ns)
@@ -433,9 +444,317 @@ impl TotalWeakener {
 }
 
 pub async fn auto_hack(ns: &NsWrapper<'_>) {
-    let mut weakener = TotalWeakener::new(ns);
+    let machines = crate::machine::get_machines(ns);
+
+    let mut weakener = TotalWeakener::new(ns, &machines);
     weakener.display_targets(ns);
 
     weakener.run(ns).await;
     ns.tprint("Machines weakened.");
+    drop(weakener);
+
+    let mut batch_hacker = BatchHacker::new(ns, &machines);
+    batch_hacker.run(ns);
+}
+
+enum EventType {
+    FirstWeaken,
+    Grow,
+    SecondWeaken,
+    Hack,
+    Finish,
+}
+
+struct TimedEvent {
+    time: f64,
+    batch_id: usize,
+    event_type: EventType,
+}
+
+impl PartialEq for TimedEvent {
+    fn eq(
+        &self,
+        other: &Self,
+    ) -> bool {
+        self.time == other.time
+    }
+}
+
+impl Eq for TimedEvent {}
+
+impl PartialOrd for TimedEvent {
+    fn partial_cmp(
+        &self,
+        other: &Self,
+    ) -> Option<Ordering> {
+        self.time.partial_cmp(&other.time)
+    }
+}
+
+impl Ord for TimedEvent {
+    fn cmp(
+        &self,
+        other: &Self,
+    ) -> Ordering {
+        self.time.partial_cmp(&other.time).unwrap()
+    }
+}
+
+struct HackerTargetPair {
+    hacker: Arc<Machine>,
+    target: Arc<Machine>,
+}
+
+struct BatchHacker {
+    events: BinaryHeap<TimedEvent>,
+    batches: HashMap<usize, HackerTargetPair>,
+
+    missed_spawns: usize,
+}
+
+impl BatchHacker {
+    fn push_new_jobs_to_events(
+        &mut self,
+        ns: &NsWrapper,
+        mut time: f64,
+        batch_id: usize,
+        spawn_now: bool,
+    ) {
+        use EventType::*;
+
+        let batch = self.batches.get(&batch_id).unwrap();
+        let (hack_time, grow_time, weaken_time) = batch.target.get_hgw_time(ns);
+
+        let mut now = Date::now();
+
+        // first weaken
+        // first to spawn
+        // second to finish
+        if spawn_now || time < now {
+            // immediately spawn if it's already time
+            HGWJob::weaken(ns, &*batch.hacker, &*batch.target, 1);
+            time = now;
+        }
+        else {
+            self.events.push(TimedEvent {
+                time,
+                event_type: FirstWeaken,
+                batch_id,
+            });
+        }
+
+        // hack
+        // fourth to spawn
+        // first to finish
+        self.events.push(TimedEvent {
+            time: time + weaken_time
+                - hack_time
+                - BATCH_GRACE_PERIOD_MILLIS as f64,
+            event_type: Hack,
+            batch_id,
+        });
+
+        // grow
+        // third to spawn
+        // second to finish
+        self.events.push(TimedEvent {
+            time: time + weaken_time - grow_time
+                + BATCH_GRACE_PERIOD_MILLIS as f64,
+            event_type: Grow,
+            batch_id,
+        });
+
+        // second weaken
+        // second to spawn
+        // last to finish
+        self.events.push(TimedEvent {
+            time: time + 2. * BATCH_GRACE_PERIOD_MILLIS as f64,
+            event_type: SecondWeaken,
+            batch_id,
+        });
+
+        // finish, spawn another
+        self.events.push(TimedEvent {
+            time: time + weaken_time + 2. * BATCH_GRACE_PERIOD_MILLIS as f64,
+            event_type: Finish,
+            batch_id,
+        });
+    }
+
+    pub async fn run(
+        &mut self,
+        ns: &NsWrapper<'_>,
+    ) {
+        use EventType::*;
+
+        loop {
+            let event = self.events.pop().unwrap();
+            sleep_until(ns, event.time).await;
+
+            let batch = self.batches.get(&event.batch_id).unwrap();
+
+            match event.event_type {
+                FirstWeaken | SecondWeaken => {
+                    HGWJob::weaken(ns, &*batch.hacker, &*batch.target, 1);
+                },
+                Grow => {
+                    HGWJob::grow(ns, &*batch.hacker, &*batch.target, 1);
+                },
+                Hack => {
+                    HGWJob::hack(ns, &*batch.hacker, &*batch.target, 1);
+                },
+                // on finish, spawn another
+                Finish => {
+                    self.push_new_jobs_to_events(
+                        ns,
+                        f64::NEG_INFINITY,
+                        event.batch_id,
+                        true,
+                    );
+                },
+            }
+        }
+    }
+
+    /// Use it immediately
+    fn new(
+        ns: &NsWrapper<'_>,
+        machines: &[Machine],
+    ) -> BatchHacker {
+        // TODO: you still have to test each machines for how much you can grow
+        // them compared to how much you can hack them
+
+        const STEP_DURATION_MS: f64 = 500.;
+
+        let current_hacking_level = ns.get_player_hacking_level();
+
+        let hackers = machines
+            .iter()
+            .filter(|m| m.is_root(ns))
+            // four: two weakens, one grow, and one hack
+            .map(|m| {
+                let allowed_threads = m.get_threads_left(ns)
+                    * (RESERVATION_RATE * 1000.) as usize / (4 * 1000);
+                (m, allowed_threads)
+            })
+            .collect::<Vec<_>>();
+
+        // divided by four: two weakens, one hack, and one grow
+        let max_batches_allowed =
+            hackers.iter().map(|(m, threads)| threads).sum::<usize>();
+
+        let mut targets = machines
+            .iter()
+            // hack only machines that are
+            // not owned by the player
+            .filter(|m| !m.is_player_owned())
+            // rooted
+            .filter(|m| m.is_root(ns))
+            // has a required hacking level lower than what we have
+            .filter(|m| m.get_min_hacking_skill() <= current_hacking_level)
+            // and can be filled with money
+            .filter(|m| 0 < m.get_max_money())
+            .map(|m| {
+                let avg_yield = m.get_average_yield(ns);
+
+                let duration = m.get_weaken_time(ns);
+                let mut steps = (duration / STEP_DURATION_MS).ceil() as usize;
+                steps = steps.min(max_batches_allowed);
+
+                (m, avg_yield, steps, duration * steps as f64)
+            })
+            .collect::<Vec<_>>();
+
+        // reorder the vector by the total batch yield, top to bottom
+        targets.sort_unstable_by(|(_, _, _, tby1), (_, _, _, tby2)| {
+            tby1.partial_cmp(tby2).unwrap().reverse()
+        });
+
+        // remove the machines we won't be needing because we have too few
+        // threads
+        let mut max_size = 0;
+        let mut over_difference = 0;
+        let mut remaining_threads = max_batches_allowed;
+        for (idx, (_, _, steps, _)) in targets.iter_mut().enumerate() {
+            if *steps < remaining_threads {
+                remaining_threads -= *steps;
+            }
+            // at this point, we don't have enough memory to go by. remove those
+            // that are much less profitable and only work with these.
+            else {
+                max_size = idx + 1;
+                *steps = remaining_threads;
+                break;
+            }
+        }
+        targets.truncate(max_size);
+
+        let mut output = "\nTargets to weaken:\n".to_owned();
+
+        let (hostname_len, ..) =
+            crate::scan::get_longest_stuff(targets.iter().map(|(m, ..)| *m));
+
+        // print header
+        output += "Hostname";
+        for _ in "Hostname".len() .. hostname_len {
+            output += " ";
+        }
+
+        output += "   Solo Yield   Steps   Batch Yield\n";
+
+        for (machine, chance_yield, steps, batch_yield) in targets.iter() {
+            output += &format!(
+                "{: <hnl$}   {:>10.2}   {:>5}   ${:>12.2}\n",
+                machine.get_hostname(),
+                chance_yield,
+                steps,
+                batch_yield,
+                hnl = hostname_len
+            );
+        }
+
+        ns.tprint(&output);
+
+        let mut hacker_iter = hackers
+            .into_iter()
+            .map(|(h, t)| (Arc::new(h.clone()), t))
+            .flat_map(|(h, t)| std::iter::repeat(h).take(t));
+
+        // create the list of batches
+        let mut batches = HashMap::new(); // TODO: preallocate
+        let mut latest_id = 0;
+        for (target, _, steps, _) in targets.into_iter() {
+            let target = Arc::new(target.clone());
+
+            for _ in 0 .. steps {
+                // get the ID
+                let id = latest_id;
+                latest_id += 1;
+
+                // get a hacker
+                let hacker = hacker_iter.next().unwrap();
+
+                let htp = HackerTargetPair {
+                    hacker,
+                    target: target.clone(),
+                };
+
+                batches.insert(id, htp);
+            }
+        }
+
+        let mut batch_hacker = BatchHacker {
+            events: BinaryHeap::new(),
+            batches,
+            missed_spawns: 0,
+        };
+
+        // spawn the events
+        let now = Date::now();
+        for id in 0 .. latest_id {
+            batch_hacker.push_new_jobs_to_events(ns, now + 1000. * (1 + id) as f64, id, false);
+        }
+
+        batch_hacker
+    }
 }

@@ -14,6 +14,7 @@ debug = true
 binary-heap-plus = "0.5"
 clap = { version = "4.3", features = ["derive"] }
 decorum = "0.3"
+itertools = "0.10"
 js-sys = "0.3"
 wasm-bindgen = "0.2"
 wasm-bindgen-futures = "0.4"

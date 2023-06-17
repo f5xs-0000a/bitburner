@@ -247,18 +247,30 @@ impl Machine {
         ns.get_hack_time(self.get_hostname())
     }
 
+    pub fn get_hgw_time(
+        &self,
+        ns: &NsWrapper,
+    ) -> (f64, f64, f64) {
+        let hack_time = self.get_hack_time(ns);
+        (
+            hack_time,
+            hack_time * GROW_TIME_MUL,
+            hack_time * WEAKEN_TIME_MUL,
+        )
+    }
+
     pub fn get_grow_time(
         &self,
         ns: &NsWrapper,
     ) -> f64 {
-        self.get_hack_time(ns) * GROW_TIME_MUL
+        self.get_hgw_time(ns).1
     }
 
     pub fn get_weaken_time(
         &self,
         ns: &NsWrapper,
     ) -> f64 {
-        self.get_hack_time(ns) * WEAKEN_TIME_MUL
+        self.get_hgw_time(ns).2
     }
 
     pub fn get_max_gb_ram(
@@ -333,6 +345,34 @@ impl Machine {
         ns: &NsWrapper,
     ) -> usize {
         self.get_free_ram_hundredths(ns) / EXEC_MEMORY_USAGE_HUNDREDTHS
+    }
+
+    pub fn get_hack_rate(
+        &self,
+        ns: &NsWrapper,
+    ) -> f64 {
+        ns.hack_analyze(self.get_hostname())
+    }
+
+    pub fn get_yield_per_hack(
+        &self,
+        ns: &NsWrapper,
+    ) -> f64 {
+        self.get_hack_rate(ns) * self.get_max_money() as f64
+    }
+
+    pub fn get_hack_chance(
+        &self,
+        ns: &NsWrapper,
+    ) -> f64 {
+        ns.hack_analyze_chance(self.get_hostname())
+    }
+
+    pub fn get_average_yield(
+        &self,
+        ns: &NsWrapper,
+    ) -> f64 {
+        self.get_yield_per_hack(ns) * self.get_hack_chance(ns)
     }
 }
 
