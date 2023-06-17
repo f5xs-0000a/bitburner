@@ -50,14 +50,14 @@ extern "C" {
     #[wasm_bindgen(method)]
     fn getScriptName(this: &NS) -> JsValue;
 
-    #[wasm_bindgen(method, variadic)]
+    #[wasm_bindgen(catch, method, variadic)]
     fn exec(
         this: &NS,
         script_name: &str,
         host: &str,
         num_threads: Option<i32>,
         args: Box<[JsString]>,
-    ) -> i32;
+    ) -> Result<i32, JsValue>;
 
     #[wasm_bindgen(method)]
     fn scan(
@@ -163,6 +163,22 @@ extern "C" {
         this: &NS,
         host: &str,
     ) -> f64;
+
+    #[wasm_bindgen(method)]
+    fn write(
+        this: &NS,
+        filename: &str,
+        data: &str,
+        mode: char,
+    );
+
+    #[wasm_bindgen(method)]
+    fn scp(
+        this: &NS,
+        file: &str,
+        destination: &str,
+        source: &str,
+    ) -> bool;
 
     pub type Server;
 
@@ -321,7 +337,7 @@ impl<'a> NsWrapper<'a> {
         host: &str,
         num_threads: Option<usize>,
         args: &[impl core::ops::Deref<Target = str>],
-    ) -> Option<usize> {
+    ) -> Result<Option<usize>, JsValue> {
         use std::str::FromStr as _;
 
         let args = args
@@ -335,8 +351,9 @@ impl<'a> NsWrapper<'a> {
             num_threads.map(|x| x as i32),
             args,
         ) {
-            0 => None,
-            x => Some(x as usize),
+            Ok(0) => Ok(None),
+            Ok(x) => Ok(Some(x as usize)),
+            Err(e) => Err(e),
         }
     }
 
@@ -380,5 +397,23 @@ impl<'a> NsWrapper<'a> {
         hostname: &str,
     ) -> f64 {
         self.0.lock().unwrap().hackAnalyzeChance(hostname)
+    }
+
+    pub fn write(
+        &self,
+        filename: &str,
+        data: &str,
+        mode: char,
+    ) {
+        self.0.lock().unwrap().write(filename, data, mode)
+    }
+
+    pub fn scp(
+        &self,
+        file: &str,
+        destination: &str,
+        source: &str,
+    ) -> bool {
+        self.0.lock().unwrap().scp(file, destination, source)
     }
 }

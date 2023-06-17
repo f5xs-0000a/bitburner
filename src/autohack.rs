@@ -96,7 +96,7 @@ impl HGWJob {
         target: &str,
     ) -> Option<usize> {
         assert!(0 < threads);
-        ns.exec(script_name, hostname, Some(threads), &[target])
+        ns.exec(script_name, hostname, Some(threads), &[target]).unwrap()
     }
 
     pub fn grow(
@@ -595,11 +595,11 @@ impl BatchHacker {
 
         loop {
             let event = self.events.pop().unwrap();
-            sleep_until(ns, event.time).await;
 
             let batch = self.batches.get(&event.batch_id).unwrap();
 
             crate::debug!(ns, "{:?}\nRemaining: {}", event, self.events.len());
+            sleep_until(ns, event.time).await;
 
             match event.event_type {
                 FirstWeaken | SecondWeaken => {
@@ -730,6 +730,20 @@ impl BatchHacker {
         }
 
         ns.tprint(&output);
+
+        // TODO: assert that this function is being run at home. otherwise, fail
+
+        // write the files
+        ns.write("child_weaken.js", include_str!("child_weaken.js"), 'w');
+        ns.write("child_hack.js", include_str!("child_hack.js"), 'w');
+        ns.write("child_grow.js", include_str!("child_grow.js"), 'w');
+
+        // write the files to the hacker
+        for (hacker, _) in hackers.iter() {
+            ns.scp("child_weaken.js", &hacker.get_hostname(), "home");
+            ns.scp("child_grow.js", &hacker.get_hostname(), "home");
+            ns.scp("child_hack.js", &hacker.get_hostname(), "home");
+        }
 
         let mut hacker_iter = hackers
             .into_iter()
