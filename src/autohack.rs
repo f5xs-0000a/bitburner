@@ -32,7 +32,7 @@ async fn sleep_until(
     let now = Date::now();
 
     if now < time {
-        ns.sleep((now - time) as i32).await;
+        ns.sleep((time - now) as i32).await;
         true
     }
     else {
@@ -454,9 +454,11 @@ pub async fn auto_hack(ns: &NsWrapper<'_>) {
     drop(weakener);
 
     let mut batch_hacker = BatchHacker::new(ns, &machines);
-    batch_hacker.run(ns);
+    crate::debug!(ns, "");
+    batch_hacker.run(ns).await;
 }
 
+#[derive(Debug)]
 enum EventType {
     FirstWeaken,
     Grow,
@@ -465,6 +467,7 @@ enum EventType {
     Finish,
 }
 
+#[derive(Debug)]
 struct TimedEvent {
     time: f64,
     batch_id: usize,
@@ -487,7 +490,7 @@ impl PartialOrd for TimedEvent {
         &self,
         other: &Self,
     ) -> Option<Ordering> {
-        self.time.partial_cmp(&other.time)
+        self.time.partial_cmp(&other.time).map(|o| o.reverse())
     }
 }
 
@@ -496,15 +499,17 @@ impl Ord for TimedEvent {
         &self,
         other: &Self,
     ) -> Ordering {
-        self.time.partial_cmp(&other.time).unwrap()
+        self.partial_cmp(other).unwrap()
     }
 }
 
+#[derive(Debug)]
 struct HackerTargetPair {
     hacker: Arc<Machine>,
     target: Arc<Machine>,
 }
 
+#[derive(Debug)]
 struct BatchHacker {
     events: BinaryHeap<TimedEvent>,
     batches: HashMap<usize, HackerTargetPair>,
@@ -535,6 +540,7 @@ impl BatchHacker {
             HGWJob::weaken(ns, &*batch.hacker, &*batch.target, 1);
             time = now;
         }
+
         else {
             self.events.push(TimedEvent {
                 time,
@@ -592,6 +598,8 @@ impl BatchHacker {
             sleep_until(ns, event.time).await;
 
             let batch = self.batches.get(&event.batch_id).unwrap();
+
+            crate::debug!(ns, "{:?}\nRemaining: {}", event, self.events.len());
 
             match event.event_type {
                 FirstWeaken | SecondWeaken => {
@@ -665,10 +673,15 @@ impl BatchHacker {
             })
             .collect::<Vec<_>>();
 
+        crate::debug!(ns, "{:?}", targets);
+        crate::debug!(ns, "{:?}", max_batches_allowed);
+
         // reorder the vector by the total batch yield, top to bottom
         targets.sort_unstable_by(|(_, _, _, tby1), (_, _, _, tby2)| {
             tby1.partial_cmp(tby2).unwrap().reverse()
         });
+
+        crate::debug!(ns, "{:?}", targets);
 
         // remove the machines we won't be needing because we have too few
         // threads
@@ -678,6 +691,7 @@ impl BatchHacker {
         for (idx, (_, _, steps, _)) in targets.iter_mut().enumerate() {
             if *steps < remaining_threads {
                 remaining_threads -= *steps;
+                max_size = idx + 1;
             }
             // at this point, we don't have enough memory to go by. remove those
             // that are much less profitable and only work with these.
@@ -689,7 +703,9 @@ impl BatchHacker {
         }
         targets.truncate(max_size);
 
-        let mut output = "\nTargets to weaken:\n".to_owned();
+        crate::debug!(ns, "{:?}", targets);
+
+        let mut output = "\nTargets to hack:\n".to_owned();
 
         let (hostname_len, ..) =
             crate::scan::get_longest_stuff(targets.iter().map(|(m, ..)| *m));
@@ -752,7 +768,13 @@ impl BatchHacker {
         // spawn the events
         let now = Date::now();
         for id in 0 .. latest_id {
-            batch_hacker.push_new_jobs_to_events(ns, now + 1000. * (1 + id) as f64, id, false);
+            batch_hacker.push_new_jobs_to_events(
+                ns,
+                // now, plus a second, plus twice the grace period multiplied by the offset
+                now + 1000. + (2 * BATCH_GRACE_PERIOD_MILLIS * id) as f64,
+                id,
+                false,
+            );
         }
 
         batch_hacker
