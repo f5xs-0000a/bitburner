@@ -180,6 +180,13 @@ extern "C" {
         source: &str,
     ) -> bool;
 
+    #[wasm_bindgen(method)]
+    fn fileExists(
+        this: &NS,
+        file: &str,
+        host: &str,
+    ) -> bool;
+
     pub type Server;
 
     pub type Date;
@@ -415,5 +422,13 @@ impl<'a> NsWrapper<'a> {
         source: &str,
     ) -> bool {
         self.0.lock().unwrap().scp(file, destination, source)
+    }
+
+    pub fn file_exists(
+        &self,
+        file: &str,
+        host: &str,
+    ) -> bool {
+        self.0.lock().unwrap().fileExists(file, host)
     }
 }

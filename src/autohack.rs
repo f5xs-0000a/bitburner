@@ -210,6 +210,20 @@ impl TotalWeakener {
         let hackers = machines
             .iter()
             .filter(|m| m.is_root(ns))
+            // only allow hackers that can possess this file
+            .filter_map(|h| {
+                ns.scp("child_weaken.js", &h.get_hostname(), "home");
+                ns.scp("child_grow.js", &h.get_hostname(), "home");
+                ns.scp("child_hack.js", &h.get_hostname(), "home");
+
+                if ns.file_exists("child_weaken.js", h.get_hostname()) {
+                    Some(h)
+                }
+
+                else {
+                    None
+                }
+            })
             .cloned()
             .map(|m| (m, BinaryHeap::new_min()))
             .collect::<Vec<_>>();
@@ -454,7 +468,6 @@ pub async fn auto_hack(ns: &NsWrapper<'_>) {
     drop(weakener);
 
     let mut batch_hacker = BatchHacker::new(ns, &machines);
-    crate::debug!(ns, "");
     batch_hacker.run(ns).await;
 }
 
@@ -598,7 +611,6 @@ impl BatchHacker {
 
             let batch = self.batches.get(&event.batch_id).unwrap();
 
-            crate::debug!(ns, "{:?}\nRemaining: {}", event, self.events.len());
             sleep_until(ns, event.time).await;
 
             match event.event_type {
@@ -636,9 +648,23 @@ impl BatchHacker {
 
         let current_hacking_level = ns.get_player_hacking_level();
 
-        let hackers = machines
+        let mut hackers = machines
             .iter()
             .filter(|m| m.is_root(ns))
+            // only allow hackers that can possess this file
+            .filter_map(|h| {
+                ns.scp("child_weaken.js", &h.get_hostname(), "home");
+                ns.scp("child_grow.js", &h.get_hostname(), "home");
+                ns.scp("child_hack.js", &h.get_hostname(), "home");
+
+                if ns.file_exists("child_weaken.js", h.get_hostname()) {
+                    Some(h)
+                }
+
+                else {
+                    None
+                }
+            })
             // four: two weakens, one grow, and one hack
             .map(|m| {
                 let allowed_threads = m.get_threads_left(ns)
@@ -673,15 +699,10 @@ impl BatchHacker {
             })
             .collect::<Vec<_>>();
 
-        crate::debug!(ns, "{:?}", targets);
-        crate::debug!(ns, "{:?}", max_batches_allowed);
-
         // reorder the vector by the total batch yield, top to bottom
         targets.sort_unstable_by(|(_, _, _, tby1), (_, _, _, tby2)| {
             tby1.partial_cmp(tby2).unwrap().reverse()
         });
-
-        crate::debug!(ns, "{:?}", targets);
 
         // remove the machines we won't be needing because we have too few
         // threads
@@ -702,8 +723,6 @@ impl BatchHacker {
             }
         }
         targets.truncate(max_size);
-
-        crate::debug!(ns, "{:?}", targets);
 
         let mut output = "\nTargets to hack:\n".to_owned();
 
@@ -730,20 +749,6 @@ impl BatchHacker {
         }
 
         ns.tprint(&output);
-
-        // TODO: assert that this function is being run at home. otherwise, fail
-
-        // write the files
-        ns.write("child_weaken.js", include_str!("child_weaken.js"), 'w');
-        ns.write("child_hack.js", include_str!("child_hack.js"), 'w');
-        ns.write("child_grow.js", include_str!("child_grow.js"), 'w');
-
-        // write the files to the hacker
-        for (hacker, _) in hackers.iter() {
-            ns.scp("child_weaken.js", &hacker.get_hostname(), "home");
-            ns.scp("child_grow.js", &hacker.get_hostname(), "home");
-            ns.scp("child_hack.js", &hacker.get_hostname(), "home");
-        }
 
         let mut hacker_iter = hackers
             .into_iter()
