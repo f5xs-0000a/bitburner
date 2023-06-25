@@ -11,14 +11,21 @@ pub trait Event {
 }
 
 pub struct EventLoopContext<E>
-where E: Event {
+where
+    E: Event,
+{
     next_events: Vec<E>,
     grace_period: f64,
 }
 
 impl<E> EventLoopContext<E>
-where E: Event {
-    pub fn add_event(&mut self, event: E) {
+where
+    E: Event,
+{
+    pub fn add_event(
+        &mut self,
+        event: E,
+    ) {
         self.next_events.push(event);
     }
 
@@ -26,7 +33,10 @@ where E: Event {
         self.grace_period
     }
 
-    fn drain_to_event_pool(&mut self, extensible: &mut impl Extend<EventWrapper<E>>) {
+    fn drain_to_event_pool(
+        &mut self,
+        extensible: &mut impl Extend<EventWrapper<E>>,
+    ) {
         let drain_src = self.next_events.drain(..).map(|e| EventWrapper(e));
         extensible.extend(drain_src)
     }
@@ -164,14 +174,12 @@ where
 
                 self.state.on_event(ns, event, &mut context);
             }
-
             // if the trigger time is between now and grace period, execute
             else if last_slept_until - self.grace_period
                 <= event.trigger_time()
             {
                 self.state.on_event(ns, event, &mut context);
             }
-
             // if the trigger time is beyond grace period, it's too late. fail.
             else {
                 self.state.on_event_fail(ns, event, &mut context);
