@@ -210,6 +210,7 @@ impl TotalWeakener {
         let hackers = machines
             .iter()
             .filter(|m| m.is_root(ns))
+            .filter(|m| 0 < m.get_max_gb_ram_hundredths(ns))
             // only allow hackers that can possess this file
             .filter_map(|h| {
                 ns.scp("child_weaken.js", &h.get_hostname(), "home");
@@ -651,6 +652,7 @@ impl BatchHacker {
         let mut hackers = machines
             .iter()
             .filter(|m| m.is_root(ns))
+            .filter(|m| 0 < m.get_max_gb_ram_hundredths(ns))
             // only allow hackers that can possess this file
             .filter_map(|h| {
                 ns.scp("child_weaken.js", &h.get_hostname(), "home");
