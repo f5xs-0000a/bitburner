@@ -25,12 +25,6 @@ struct HGWTarget {
 enum AppMode {
     //#[clap(help = "scans the network")]
     Scan(ScanMode),
-    //#[clap(help = "grow on a machine")]
-    Grow(HGWTarget),
-    //#[clap(help = "weaken a machine")]
-    Weaken(HGWTarget),
-    //#[clap(help = "hack a machine")]
-    Hack(HGWTarget),
     //#[clap(help = "perform automated hacking on the network")]
     AutoHack,
     //#[clap(help = "automatically solve a contract")]
@@ -58,11 +52,6 @@ pub async fn execute_command(
         },
 
         Ok(AppMode::Scan(scan_mode)) => scan_mode.execute(&ns),
-
-        // hgw section
-        Ok(AppMode::Grow(hostname)) => ns.grow(&*hostname.inner).await,
-        Ok(AppMode::Weaken(hostname)) => ns.weaken(&*hostname.inner).await,
-        Ok(AppMode::Hack(hostname)) => ns.hack(&*hostname.inner).await,
 
         Ok(AppMode::AutoHack) => crate::autohack::auto_hack(&ns).await,
 
