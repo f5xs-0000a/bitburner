@@ -2,6 +2,7 @@ mod autohack;
 mod machine;
 mod netscript;
 mod scan;
+mod time_consts;
 mod utils;
 mod script_deploy;
 //mod contracts;

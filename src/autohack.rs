@@ -1,6 +1,8 @@
 use crate::machine::get_machines;
+use crate::time_consts::SECOND;
 use crate::event_pool::Event;
 use crate::event_pool::EventLoopState;
+use crate::netscript::Date;
 use crate::script_deploy::WEAKEN_SCRIPT;
 use crate::event_pool::EventLoopContext;
 use crate::event_pool::EventLoop;
@@ -29,8 +31,30 @@ pub async fn auto_hack(ns: &NsWrapper<'_>) {
 struct AutohackGovernor {
     grace_period: f64, // milliseconds
 
+    // list of machines there are
+    machines: VecDeque<Arc<Machine>>,
+
     // really good ones at the front, bad ones at the back
     hackers: VecDeque<Arc<Machine>>,
+
+    current_level: usize,
+}
+
+impl AutohackGovernor {
+    fn on_level_update(&mut self) {
+        unimplemented!()
+    }
+
+    fn do_level_check(&mut self, ns: &NsWrapper<'_>) {
+        let new_level = ns.get_player_hacking_level();
+
+        if new_level == self.current_level {
+            return;
+        }
+
+        self.current_level = new_level;
+        self.on_level_update();
+    }
 }
 
 impl EventLoopState for AutohackGovernor {
@@ -41,7 +65,40 @@ impl EventLoopState for AutohackGovernor {
         ns: &NsWrapper<'_>,
         ctx: &mut EventLoopContext<Self::Event>,
     ) {
-        unimplemented!()
+        let now = Date::now();
+
+        // spawn as many weakeners as we can
+        for machine in self.machines.iter() {
+            if machine.is_player_owned() {
+                continue;
+            }
+
+            if !machine.is_root(ns) {
+                continue;
+            }
+
+            if self.current_level < machine.get_min_hacking_skill() {
+                continue;
+            }
+
+            if 0 < machine.get_max_money() {
+                continue;
+            }
+
+            let allowed_spawn_time = unimplemented!();
+
+            // spawn the weakener
+            TotalWeakener::spawn(
+                ns,
+                machine.clone(),
+                allowed_spawn_time,
+                ctx,
+                self
+            );
+        }
+
+        // also spawn checks on levels, one second later
+        ctx.add_event(HackStates::LevelChecker(now + SECOND));
     }
 
     fn on_event(
@@ -50,7 +107,15 @@ impl EventLoopState for AutohackGovernor {
         event: Self::Event,
         ctx: &mut EventLoopContext<Self::Event>,
     ) {
-        unimplemented!()
+        use HackStates::*;
+
+        match event {
+            LevelCheck => self.do_level_check(ns),
+            TotalWeakener(t) => match t.on_event(ns, ctx, self) {
+                Ok(()) => {},
+                Err(e) => unimplemented!(),
+            }
+        }
     }
 
     fn on_event_fail(
@@ -59,7 +124,12 @@ impl EventLoopState for AutohackGovernor {
         event: Self::Event,
         ctx: &mut EventLoopContext<Self::Event>,
     ) {
-        unimplemented!()
+        use HackStates::*;
+
+        match event {
+            LevelCheck => self.do_level_check(ns),
+            TotalWeakener(t) => t.on_event_fail(),
+        }
     }
 }
 
@@ -114,6 +184,7 @@ impl AutohackGovernor {
 }
 
 enum HackStates {
+    LevelChecker(f64),
     TotalWeakener(TotalWeakener),
     // more to go, like:
     // Grower,
@@ -122,11 +193,21 @@ enum HackStates {
 
 impl Event for HackStates {
     fn trigger_time(&self) -> f64 {
-        unimplemented!()
+        use HackStates::*;
+
+        match self {
+            LevelChecker(tt) => tt,
+            TotalWeakener(tw) => unimplemented!(),
+        }
     }
 
     fn grace_period(&self) -> f64 {
-        unimplemented!()
+        use HackStates::*;
+
+        match self {
+            LevelChecker(_) => f64::MAX,
+            TotalWeakener(tw) => unimplemented!(),
+        }
     }
 }
 
