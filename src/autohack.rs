@@ -1,26 +1,473 @@
-use core::{
-    cmp::Ordering,
-    mem::drop,
-};
+use crate::machine::get_machines;
+use crate::event_pool::Event;
+use crate::event_pool::EventLoopState;
+use crate::script_deploy::WEAKEN_SCRIPT;
+use crate::event_pool::EventLoopContext;
+use crate::event_pool::EventLoop;
+use crate::utils::rational_mult;
+use std::collections::VecDeque;
 use std::{
-    collections::HashMap,
     sync::Arc,
 };
-
-use binary_heap_plus::{
-    BinaryHeap,
-    MinComparator,
-};
-use decorum::R64;
+//use mergefold::MergeFold;
 
 use crate::{
     machine::Machine,
     netscript::{
-        Date,
         NsWrapper,
     },
 };
+use crate::machine::EXEC_MEMORY_USAGE_HUNDREDTHS;
 
+const RESERVATION_RATE: f64 = 0.9;
+
+pub async fn auto_hack(ns: &NsWrapper<'_>) {
+    let ahg = AutohackGovernor::new(ns);
+    ahg.run(ns).await;
+}
+
+struct AutohackGovernor {
+    grace_period: f64, // milliseconds
+
+    // really good ones at the front, bad ones at the back
+    hackers: VecDeque<Arc<Machine>>,
+}
+
+impl EventLoopState for AutohackGovernor {
+    type Event = HackStates;
+
+    fn initial_run(
+        &mut self,
+        ns: &NsWrapper<'_>,
+        ctx: &mut EventLoopContext<Self::Event>,
+    ) {
+        unimplemented!()
+    }
+
+    fn on_event(
+        &mut self,
+        ns: &NsWrapper<'_>,
+        event: Self::Event,
+        ctx: &mut EventLoopContext<Self::Event>,
+    ) {
+        unimplemented!()
+    }
+
+    fn on_event_fail(
+        &mut self,
+        ns: &NsWrapper<'_>,
+        event: Self::Event,
+        ctx: &mut EventLoopContext<Self::Event>,
+    ) {
+        unimplemented!()
+    }
+}
+
+impl AutohackGovernor {
+    pub fn new(ns: &NsWrapper<'_>) -> AutohackGovernor {
+        // TODO: you might want to consider moving this to initial_run 
+        let hackers = get_machines(ns)
+            .iter()
+            // the hackers must be rooted
+            .filter(|m| m.is_root(ns))
+            // the hackers must have free RAM
+            .filter(|m| 0 < m.get_max_gb_ram_hundredths(ns))
+            // only allow hackers that can possess this file
+            .filter_map(|h| {
+                ns.scp("child_weaken.js", &h.get_hostname(), "home");
+                ns.scp("child_grow.js", &h.get_hostname(), "home");
+                ns.scp("child_hack.js", &h.get_hostname(), "home");
+
+                if ns.file_exists("child_weaken.js", h.get_hostname()) {
+                    Some(h)
+                }
+
+                else {
+                    None
+                }
+            })
+            .map(|m| Arc::new(m.clone()))
+            .collect::<VecDeque<_>>();
+
+        AutohackGovernor {
+            grace_period: 50., // TODO: add a proper value for this
+            hackers,
+        }
+    }
+
+    pub async fn run(self, ns: &NsWrapper<'_>) {
+        // TODO: you haven't selected which machines to hack on.
+
+        let mut event_loop = EventLoop::new(self);
+        event_loop.run(ns).await;
+    }
+
+    fn get_hackers_iter<'a>(&'a mut self) -> AHGHackerIterator<'a> {
+        let rotations_left = self.hackers.len();
+
+        AHGHackerIterator {
+            governor: self,
+            has_called_next: false,
+            rotations_left,
+        }
+    }
+}
+
+enum HackStates {
+    TotalWeakener(TotalWeakener),
+    // more to go, like:
+    // Grower,
+    // BatchHacker,
+}
+
+impl Event for HackStates {
+    fn trigger_time(&self) -> f64 {
+        unimplemented!()
+    }
+
+    fn grace_period(&self) -> f64 {
+        unimplemented!()
+    }
+}
+
+/// Iterator over the list of hackers.
+///
+/// This list will prioritize utilizing machines that have a lot of RAM first.
+/// By design, if this iterator is called using next() and then dropped,
+/// instantiating another of this iterator then calling next() will return the
+/// same Machine.
+///
+/// This is heavily used for hacking machines.
+struct AHGHackerIterator<'a> {
+    governor: &'a mut AutohackGovernor,
+    has_called_next: bool,
+    rotations_left: usize,
+}
+
+impl<'a> AHGHackerIterator<'a> {
+    /// Returns the next machine that has at least a given memory requirement.
+    fn next_available_unit(
+        &mut self,
+        ns: &NsWrapper<'_>,
+        memory_requirement_hundredths: usize
+    ) -> Option<(Arc<Machine>, usize)> {
+        for machine in self.by_ref() {
+            let max_ram = machine.get_max_gb_ram_hundredths(ns);
+            let free_ram = machine.get_free_ram_hundredths(ns);
+
+            let max_usable_ram = rational_mult(max_ram, RESERVATION_RATE);
+            let used_ram = max_ram - free_ram;
+
+            if max_usable_ram <= used_ram {
+                // calculate the number of instances that we can produce using
+                // given memory requirement
+                let instances = (max_usable_ram - used_ram) / memory_requirement_hundredths;
+
+                // if there is at least one instance, we can use the machine
+                if 0 < instances {
+                    return Some((machine, instances));
+                }
+            }
+        }
+
+        None
+    }
+}
+
+impl<'a> Iterator for AHGHackerIterator<'a> {
+    type Item = Arc<Machine>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        // if we've fully rotated the iterator, don't return anything else
+        if self.rotations_left == 0 {
+            return None;
+        }
+
+        // adjust the amount of rotations to do
+        self.rotations_left -= 1;
+
+        if self.has_called_next {
+            // if we've called next already, rotate by popping the front element
+            // and pushing it to the back
+            let front = self.governor.hackers.pop_front().unwrap();
+            self.governor.hackers.push_back(front);
+        }
+
+        self.has_called_next = true;
+        self.governor.hackers.front().cloned()
+    }
+}
+
+struct TotalWeakener {
+    grace_period: f64,
+    target: Arc<Machine>,
+    weakens_left: usize,
+}
+
+impl TotalWeakener {
+    fn spawn_inner(
+        ns: &NsWrapper<'_>,
+        machine: Arc<Machine>,
+        spawn_time: f64,
+        govr: &mut AutohackGovernor,
+    ) -> TotalWeakener {
+        let weakens_left = machine.get_weaken_threads_to_reduce(ns);
+        
+        TotalWeakener {
+            grace_period: govr.grace_period,
+            target: machine,
+            weakens_left,
+        }
+    }
+
+    pub fn spawn(
+        ns: &NsWrapper<'_>,
+        machine: Arc<Machine>,
+        spawn_time: f64,
+        ctx: &mut EventLoopContext<HackStates>,
+        govr: &mut AutohackGovernor,
+    ) {
+        let weakener = Self::spawn_inner(ns, machine, spawn_time, govr);
+
+        // add this job into the pool
+        unimplemented!();
+    }
+
+    pub fn on_event(
+        mut self,
+        ns: &NsWrapper<'_>,
+        ctx: &mut EventLoopContext<HackStates>,
+        govr: &mut AutohackGovernor,
+    ) -> Result<(), Self> {
+        // this state has been chosen to be the next to invoke its event
+        // check first for machine that we can use
+        while 0 < self.weakens_left {
+            if let Some((machine, max_instances)) = govr.get_hackers_iter().next_available_unit(ns, EXEC_MEMORY_USAGE_HUNDREDTHS) {
+                let instances = max_instances.min(self.weakens_left);
+
+                ns.exec(
+                    WEAKEN_SCRIPT.filename,
+                    machine.get_hostname(),
+                    Some(instances),
+                    &[self.target.get_hostname()]
+                ).unwrap();
+
+                self.weakens_left -= instances;
+
+                // TODO: do we wait for this to finish then trigger another event?
+                unimplemented!();
+            }
+
+            // if there are no machines that are usable, return this as an error
+            else {
+                return Err(self);
+            }
+        }
+
+        // if we've reached this, then we've successfully spawned as many
+        // threads as we can to minimize the security of this machine
+        //
+        // only then we can spawn, one grace period later, a job that will
+        // maximally grow a server
+        // it's unimplemented!() for now.
+
+        Ok(())
+    }
+}
+
+/*
+struct MachinePrepper {
+    grace_period: f64,
+    machine: Arc<Machine>,
+    last_level: usize,
+
+    weakens_left: usize,
+    after_weaken_weakens_left: usize
+
+    next_event: (),
+}
+
+impl MachinePrepper {
+    fn on_event(
+        self,
+        ctx: &mut EventLoopContext<()>,
+        govr: &mut AutohackGovernor
+    ) -> Result<(), Self> {
+        // what event are we in right now though?
+        if 0 < after_weaken_weakens_left {
+            self.spawn_weakener();
+        }
+    }
+
+    fn on_failure(
+    ) -> Result<(), Self> {
+    }
+}
+*/
+
+/*
+pub struct HackLoopState {
+    // target machiens should be indexable by name but also must have the most
+    // performant be the first to be chosen
+    machines: HashMap<Arc<str>, HackLoopStage>,
+}
+
+impl HackLoopState {
+    fn do_level_up_check(&mut self, ctx: &mut EventLoopContext<HackLoopEvents>) {
+        unimplemented!();
+        ctx.add_event(LevelUpCheck);
+    }
+}
+
+impl EventLoopState for HackLoopStage {
+    type Event = HackLoopEvents;
+
+    fn initial_run(ns: &NsWrapper<'_>, ctx: &mut EventLoopContext<HackLoopEvents>)
+    {
+        // for each of the targetted machines, push the event
+        self.machines.values().on_start(ns, ctx);
+
+        // check for level up too
+        ctx.push(HackLoopEvents::LevelUpCheck);
+    }
+
+    fn on_event(ns: &NsWrapper<'_>, event: HackLoopEvents, ctx: &mut EventLoopContext<HackLoopEvents>) {
+        match event {
+            LevelUpCheck => self.do_level_up_check(ctx),
+        }
+    }
+
+    fn on_event_fail(ns: &NsWrapper<'_>, event: HackLoopEvents, ctx: &mut EventLoopContext<HackLoopEvents>) {
+        match event {
+            // don't care, still check for level up
+            LevelUpCheck => self.do_level_up_check(ctx),
+        }
+    }
+}
+
+enum HackLoopStage {
+    WeakenGrow(WeakenGrow),
+    HackAnalysis(HackAnalysis),
+    HackLoop(HackLoop),
+}
+
+enum HackLoopEvents {
+    LevelUpCheck,
+}
+
+// the stage of a single target machine on being weakened and grown
+pub struct WeakenGrow {
+    machine: Arc<Machine>,
+
+    weakens_left: usize,
+
+    // if None, then we have fully drained a machine
+    grows_required: Option<usize>,
+}
+
+impl WeakenGrow {
+    pub fn new(target: Arc<Machine>) -> WeakenGrow {
+        let mut grows_requried = None;
+        let available_money = machine.get_money_available(ns);
+
+        if 0 < available_money {
+            let multiplier = machine.get_max_money(ns) as f64 / available_money as f64;
+            grows_requried = Some(ns.growthAnalyze(ns, multiplier).ceil() as usize);
+        }
+
+        let weakens_left = machine.get_weaken_threads_to_reduce(ns);
+
+        WeakenGrow {
+            machine: target,
+            weakens_left,
+            grows_required,
+        }
+    }
+
+    pub fn initial_run(&mut self, ns: &NsWrapper<'_>, ctx: &mut EventLoopContext<HSEvent>) {
+        // send a weaken event
+        ctx.add_event(unimplemented!());
+
+        // if we're growing this machine...
+        match self.grows_required() {
+            // dedicae all
+        }
+
+        // send another signal to do grow
+        ctx.add_event(unimplemented!());
+    }
+
+    // initial run
+
+    // on event
+    //
+    // TODO: not done here yet
+}
+*/
+
+/*
+struct MachineAnalysis {
+    machine: Arc<Machine>,
+    hack_time: f64,
+    min_security_thousandths: f64,
+}
+
+enum HackStage {
+}
+
+enum HSEvent {
+    // continues an HWGW thread
+    ContinueHWGW(String, usize),
+    EndHWGW(String, usize),
+    SpawnHWGW(String),
+    CheckLevel
+}
+
+enum HWGWState {
+    // first spawned, second to end
+    FirstWeaken,
+    // second spawned, third to end
+    SecondWeaken,
+    // third spawned, second to end
+    Grow,
+    // last spawned, fourth to end
+    Hack,
+}
+
+// weakens machines
+struct HackState {
+    pre_analysis: HashMap<Arc<Machine>>,
+    hack: Vec<MachineAnalysis>,
+    last_level_check: usize,
+    hacks_per_grow: usize,
+
+    last_hwgw_id: usize,
+    running_hwgw_threads: HashMap<usize, HWGW>,
+}
+
+impl HackState {
+    fn do_spawn_hwgw_event(&mut self, id: usize, ctx: &mut EventLoopContext<HSEvent>) {
+        
+    }
+
+    fn on_continue_hwgw_event(&mut self, id: usize, ctx: &mut EventLoopContext<HSEvent>) {
+        
+    }
+}
+
+impl HackState {
+    fn new() -> HackState {
+    }
+    
+    // do things on level up.
+    // you usually would reanalyze everything.
+    fn on_level_up() {
+        
+    }
+}
+*/
+
+/*
 const REFRESH_GRACE_PERIOD_MILLIS: usize = 10;
 const RESERVATION_RATE: f64 = 0.9;
 const BATCH_GRACE_PERIOD_MILLIS: usize = 100;
@@ -458,20 +905,6 @@ impl TotalWeakener {
     }
 }
 
-pub async fn auto_hack(ns: &NsWrapper<'_>) {
-    let machines = crate::machine::get_machines(ns);
-
-    let mut weakener = TotalWeakener::new(ns, &machines);
-    weakener.display_targets(ns);
-
-    weakener.run(ns).await;
-    ns.tprint("Machines weakened.");
-    drop(weakener);
-
-    let mut batch_hacker = BatchHacker::new(ns, &machines);
-    batch_hacker.run(ns).await;
-}
-
 #[derive(Debug)]
 enum EventType {
     FirstWeaken,
@@ -801,3 +1234,4 @@ impl BatchHacker {
         batch_hacker
     }
 }
+*/

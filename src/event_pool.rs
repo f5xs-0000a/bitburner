@@ -8,6 +8,7 @@ use crate::netscript::{
 
 pub trait Event {
     fn trigger_time(&self) -> f64;
+    fn grace_period(&self) -> f64;
 }
 
 pub struct EventLoopContext<E>
@@ -15,7 +16,6 @@ where
     E: Event,
 {
     next_events: Vec<E>,
-    grace_period: f64,
 }
 
 impl<E> EventLoopContext<E>
@@ -29,10 +29,6 @@ where
         self.next_events.push(event);
     }
 
-    pub fn get_grace_period(&self) -> f64 {
-        self.grace_period
-    }
-
     fn drain_to_event_pool(
         &mut self,
         extensible: &mut impl Extend<EventWrapper<E>>,
@@ -42,25 +38,25 @@ where
     }
 }
 
-trait EventLoopState {
+pub trait EventLoopState {
     type Event: Event;
 
-    fn initial_run(
+    fn initial_run<'a>(
         &mut self,
-        ns: &NsWrapper<'_>,
+        ns: &NsWrapper<'a>,
         ctx: &mut EventLoopContext<Self::Event>,
     );
 
-    fn on_event(
+    fn on_event<'a>(
         &mut self,
-        ns: &NsWrapper<'_>,
+        ns: &NsWrapper<'a>,
         event: Self::Event,
         ctx: &mut EventLoopContext<Self::Event>,
     );
 
-    fn on_event_fail(
+    fn on_event_fail<'a>(
         &mut self,
-        ns: &NsWrapper<'_>,
+        ns: &NsWrapper<'a>,
         event: Self::Event,
         ctx: &mut EventLoopContext<Self::Event>,
     );
@@ -126,24 +122,22 @@ where
     }
 }
 
-struct EventLoop<E>
+pub struct EventLoop<E>
 where
     E: EventLoopState,
 {
     event_pool: BinaryHeap<EventWrapper<E::Event>>,
     state: E,
-    grace_period: f64,
 }
 
 impl<E> EventLoop<E>
 where
     E: EventLoopState,
 {
-    fn new(state: E) -> EventLoop<E> {
+    pub fn new(state: E) -> EventLoop<E> {
         EventLoop {
             event_pool: BinaryHeap::new(),
             state,
-            grace_period: 50., // milliseconds
         }
     }
 
@@ -153,7 +147,6 @@ where
     ) {
         let mut context = EventLoopContext {
             next_events: Vec::with_capacity(16),
-            grace_period: self.grace_period,
         };
 
         // populate the pool first
@@ -163,6 +156,7 @@ where
         let mut last_slept_until = Date::now();
         while let Some(event) = self.event_pool.pop() {
             let event = event.0;
+            let grace_period = event.grace_period();
 
             // TODO: rework this.
 
@@ -174,12 +168,14 @@ where
 
                 self.state.on_event(ns, event, &mut context);
             }
+
             // if the trigger time is between now and grace period, execute
-            else if last_slept_until - self.grace_period
+            else if last_slept_until - grace_period
                 <= event.trigger_time()
             {
                 self.state.on_event(ns, event, &mut context);
             }
+
             // if the trigger time is beyond grace period, it's too late. fail.
             else {
                 self.state.on_event_fail(ns, event, &mut context);

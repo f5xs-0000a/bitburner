@@ -3,6 +3,9 @@ mod machine;
 mod netscript;
 mod scan;
 mod utils;
+mod script_deploy;
+//mod contracts;
+mod event_pool;
 //mod range_set;
 
 use clap::{

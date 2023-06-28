@@ -14,7 +14,7 @@ const WEAKEN_SECURITY_DECREASE_THOUSANDTHS: usize = 50;
 const HACK_SECURITY_INCREASE_THOUSANDTHS: usize = 2;
 const GROW_SECURITY_INCREASE_THOUSANDTHS: usize = 4;
 
-const EXEC_MEMORY_USAGE_HUNDREDTHS: usize = 175;
+pub const EXEC_MEMORY_USAGE_HUNDREDTHS: usize = 175;
 
 #[derive(Clone, Debug)]
 pub struct Machine {
