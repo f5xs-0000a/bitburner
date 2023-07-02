@@ -394,8 +394,6 @@ impl TargetStateBundle {
         }
     }
 
-    fn on_level_up(&mut self) {}
-
     fn on_no_memory(&mut self) {
         self.is_waiting_for_memory = true;
     }
@@ -589,6 +587,10 @@ impl AutoHackGovernor {
         self.targets_by_score.extend(buffer.drain(..));
 
         // then sort
+        self.resort_targets_by_score(ns);
+    }
+
+    fn resort_targets_by_score(&mut self, ns: &NsWrapper<'_>) {
         self.targets_by_score.sort_by_cached_key(|(_, m)| {
             let mlock = m.lock().unwrap();
             let avg_yld = mlock.machine.get_average_yield(ns);
@@ -635,8 +637,19 @@ impl AutoHackGovernor {
             return;
         }
 
+        // only regenerate hackers and targets upon level up
         self.level = level;
         self.regenerate_hackers_and_targets(ns);
+
+        // set everything back to total weaken
+        for target in self.targets_by_score.iter() {
+            let mut target_lock = target.lock().unwrap();
+
+            target_lock.state = TotalWeaken(target_lock.machine.get_weaken_threads_to_reduce());
+        }
+
+        // resort targets by score
+        self.resort_targets_by_score(ns);
     }
 }
 
