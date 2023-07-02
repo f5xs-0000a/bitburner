@@ -627,6 +627,17 @@ impl AutoHackGovernor {
             rotations_left,
         }
     }
+
+    fn do_level_up_check(&mut self, ns: &NsWrapper<'_>) {
+        let level = ns.get_player_hacking_level();
+
+        if level == self.hacking_level {
+            return;
+        }
+
+        self.level = level;
+        self.regenerate_hackers_and_targets(ns);
+    }
 }
 
 impl EventLoopState for AutoHackGovernor {
@@ -682,7 +693,15 @@ impl EventLoopState for AutoHackGovernor {
             },
 
             GeneralPoll => {
-                unimplemented!()
+                self.do_level_up_check(ns);
+
+                // spawn another general poll request
+                ctx.add_event(
+                    AutoHackEventWrapped::new_general_poll(
+                        Date::now() + MILLISECOND * 50.,
+                        MILLISECOND * 50.
+                    )
+                );
             },
         }
     }
