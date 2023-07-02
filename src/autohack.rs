@@ -25,7 +25,7 @@ use crate::{
         MILLISECOND,
         SECOND,
     },
-    utils::rational_mult,
+    utils::rational_mult_u64,
 };
 use crate::{
     machine::Machine,
@@ -144,7 +144,7 @@ fn find_available_hackers(
     // allow splitting the threads among machines
     if split == NoSplit {
         for hacker in hackers {
-            let available_threads = hacker.get_threads_left(ns);
+            let available_threads = hacker.get_threads_left(ns) as usize;
 
             // if we've found the machine that can support that many
             if hgw_threads <= available_threads {
@@ -162,7 +162,7 @@ fn find_available_hackers(
     }
 
     for hacker in hackers {
-        let available_threads = hacker.get_threads_left(ns).min(hgw_threads);
+        let available_threads = (hacker.get_threads_left(ns) as usize).min(hgw_threads);
 
         // if this machine does not have any available threads left,
         // skip this machine
@@ -706,13 +706,13 @@ impl<'a> AHGHackerIterator<'a> {
     fn next_available_unit(
         &mut self,
         ns: &NsWrapper<'_>,
-        memory_requirement_hundredths: usize,
-    ) -> Option<(Arc<Machine>, usize)> {
+        memory_requirement_hundredths: u64,
+    ) -> Option<(Arc<Machine>, u64)> {
         for machine in self.by_ref() {
             let max_ram = machine.get_max_gb_ram_hundredths(ns);
             let free_ram = machine.get_free_ram_hundredths(ns);
 
-            let max_usable_ram = rational_mult(max_ram, RESERVATION_RATE);
+            let max_usable_ram = rational_mult_u64(max_ram, RESERVATION_RATE);
             let used_ram = max_ram - free_ram;
 
             if max_usable_ram <= used_ram {
