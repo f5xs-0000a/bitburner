@@ -168,14 +168,10 @@ where
 
                 self.state.on_event(ns, event, &mut context);
             }
-
             // if the trigger time is between now and grace period, execute
-            else if last_slept_until - grace_period
-                <= event.trigger_time()
-            {
+            else if last_slept_until - grace_period <= event.trigger_time() {
                 self.state.on_event(ns, event, &mut context);
             }
-
             // if the trigger time is beyond grace period, it's too late. fail.
             else {
                 self.state.on_event_fail(ns, event, &mut context);

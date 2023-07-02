@@ -60,6 +60,12 @@ extern "C" {
     ) -> Result<i32, JsValue>;
 
     #[wasm_bindgen(method)]
+    fn kill(
+        this: &NS,
+        pid: i32,
+    ) -> bool;
+
+    #[wasm_bindgen(method)]
     fn scan(
         this: &NS,
         scan: Option<&str>,
@@ -186,6 +192,9 @@ extern "C" {
         file: &str,
         host: &str,
     ) -> bool;
+
+    #[wasm_bindgen(method)]
+    fn getHostname(this: &NS) -> JsValue;
 
     pub type Server;
 
@@ -338,6 +347,10 @@ impl<'a> NsWrapper<'a> {
         self.0.lock().unwrap().getScriptName().as_string().unwrap()
     }
 
+    pub fn get_hostname(&self) -> String {
+        self.0.lock().unwrap().getHostname().as_string().unwrap()
+    }
+
     pub fn exec<'b>(
         &self,
         script_name: &str,
@@ -430,5 +443,12 @@ impl<'a> NsWrapper<'a> {
         host: &str,
     ) -> bool {
         self.0.lock().unwrap().fileExists(file, host)
+    }
+
+    pub fn kill(
+        &self,
+        pid: i32,
+    ) -> bool {
+        self.0.lock().unwrap().kill(pid)
     }
 }

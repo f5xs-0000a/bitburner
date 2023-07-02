@@ -10,7 +10,10 @@ pub fn get_attribute<T>(
 }
 
 /// Performs x * p in a convoluted way that reduces errors.
-pub fn rational_mult(x: usize, p: f64) -> usize {
+pub fn rational_mult(
+    x: usize,
+    p: f64,
+) -> usize {
     if x == 0 {
         return 0;
     }
@@ -18,7 +21,8 @@ pub fn rational_mult(x: usize, p: f64) -> usize {
     // find the optimal power of 2 that will make x * p no greater than
     // usize::MAX so it does not overflow. it's basically just:
     // log(MAX) - log(x) - max(0, log(p))
-    let power_2 = (usize::MAX.ilog2() - x.ilog2() - (p.log2().max(0.) as u32)) as i32;
+    let power_2 =
+        (usize::MAX.ilog2() - x.ilog2() - (p.log2().max(0.) as u32)) as i32;
 
     // x * p = x * (p * q) / q
     // calculate q, which is the power of 2
