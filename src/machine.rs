@@ -180,7 +180,7 @@ impl Machine {
     }
 
     pub fn get_money_available(&self, ns: &NsWrapper) -> u64 {
-        ns.get_server_money_available(self.get_hostname())
+        ns.get_server_money_available(self.get_hostname()).unwrap()
     }
 
     pub fn is_root(

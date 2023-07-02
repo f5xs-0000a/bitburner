@@ -201,11 +201,11 @@ extern "C" {
         cores: Option<i32>,
     ) -> f64;
 
-    #[wasm_bindgen(method)]
+    #[wasm_bindgen(catch, method)]
     fn getServerMoneyAvailable(
         this: &NS,
-        host: &str
-    ) -> u64;
+        host: &str,
+    ) -> Result<f64, JsValue>;
 
     #[wasm_bindgen(method)]
     fn getHostname(this: &NS) -> JsValue;
@@ -478,7 +478,7 @@ impl<'a> NsWrapper<'a> {
     pub fn get_server_money_available(
         &self,
         hostname: &str
-    ) -> u64 {
-        self.0.lock().unwrap().getServerMoneyAvailable(hostname)
+    ) -> Result<u64, JsValue> {
+        self.0.lock().unwrap().getServerMoneyAvailable(hostname).map(|val| val.round() as u64)
     }
 }

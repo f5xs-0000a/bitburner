@@ -60,10 +60,12 @@ pub trait EventLoopState {
         event: Self::Event,
         ctx: &mut EventLoopContext<Self::Event>,
     );
+
+    fn post_loop_inspect<'a>(&self, ns: &NsWrapper<'a>, event_heap: &BinaryHeap<EventWrapper<Self::Event>>);
 }
 
 #[derive(Debug)]
-struct EventWrapper<E>(E)
+pub struct EventWrapper<E>(pub E)
 where
     E: Event;
 
@@ -93,10 +95,7 @@ where
         &self,
         other: &Self,
     ) -> Ordering {
-        self.0
-            .trigger_time()
-            .partial_cmp(&other.0.trigger_time())
-            .unwrap()
+        self.partial_cmp(&other).unwrap()
     }
 }
 
@@ -180,6 +179,8 @@ where
             }
 
             context.drain_to_event_pool(&mut self.event_pool);
+
+            self.state.post_loop_inspect(ns, &self.event_pool);
         }
     }
 }

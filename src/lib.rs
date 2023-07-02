@@ -67,14 +67,12 @@ pub async fn execute_command(
 
 #[macro_export]
 macro_rules! debug {
-    ($ns: expr) => {
-        //crate::netscript::alert(&*format!("{}:{}", file!(), line!()));
-        $ns.tprint(&*format!("{}:{}", file!(), line!()));
-    };
-    ($ns: expr, $($arg:tt)*) => {
-        let mut first = format!("{}:{}\n", file!(), line!());
-        first += &*format!($($arg)*);
-        //crate::netscript::alert(&*first);
-        $ns.tprint(&*first);
+    ($ns: expr, $val:expr) => {
+        {
+            let first = format!("{}:{}\n{:#?}", file!(), line!(), $val);
+            $ns.tprint(&*first);
+
+            $val
+        }
     };
 }
