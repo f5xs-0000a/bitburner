@@ -35,21 +35,23 @@ use crate::{
 const RESERVATION_RATE: f64 = 0.9;
 
 pub async fn auto_hack(ns: &NsWrapper<'_>) {
-    //let mut ahg = EventLoop::new(AutoHackGovernor::new(ns));
-    //ahg.run(ns).await;
+    let mut ahg = EventLoop::new(AutoHackGovernor::new(ns));
+    ahg.run(ns).await;
     
     // might want to test this out.
-    let mut ahg = AutoHackGovernor::new(ns);
+    //let mut ahg = EventLoop::new(AutoHackGovernor::new(ns));
 
-    ns.tprint(&format!("{:#?}", &ahg));
+    //ns.tprint(&format!("{:#?}", &ahg));
 }
 
+#[derive(Debug)]
 enum AutoHackEventType {
     PollTarget(Arc<str>),
     MemoryFreed(Arc<str>),
     GeneralPoll,
 }
 
+#[derive(Debug)]
 struct AutoHackEventWrapped {
     trigger_time: f64,
     grace_period: f64,
@@ -255,6 +257,12 @@ impl TargetStateBundle {
                 None => return None,
             };
 
+        if hackers.is_empty() {
+            return None;
+        }
+
+        ns.tprint(&format!("hackers: {:#?}", hackers));
+
         // the run time is different from spawn time
         // the spawn time is immediate.
         // the run time is spawn time + sleep time
@@ -296,6 +304,8 @@ impl TargetStateBundle {
             metadatas.push(metadata);
         }
 
+        ns.tprint(&format!("metas: {:#?}", metadatas));
+
         Some(metadatas)
     }
 
@@ -312,7 +322,14 @@ impl TargetStateBundle {
             TotalWeaken(weakens_left) => {
                 let now = Date::now();
 
-                let threads = weakens_left;
+                if weakens_left == 0 {
+                    // correct implementation is below
+                    // NOTE: assume that max_grow performs creating another poll
+                    //self.machine_state = MaxGrow(unimplemented!());
+                    //self.on_poll(ns, ctx, govr);
+
+                    return;
+                }
 
                 // spawn weaken
                 let maybe_pid_meta = self.spawn_hgw(
@@ -321,7 +338,7 @@ impl TargetStateBundle {
                     govr.get_hackers_iter(),
                     now,
                     now,
-                    threads,
+                    weakens_left,
                     PartialSplit,
                 );
 
@@ -336,18 +353,8 @@ impl TargetStateBundle {
                 let new_weakens_left = weakens_left
                     - pid_meta.iter().map(|meta| meta.threads).sum::<usize>();
 
+                // TODO: make sure that running_pids does not grow too large
                 self.running_pids.push_front((now, pid_meta));
-
-                if new_weakens_left == 0 {
-                    ns.tprint("Weakening finished.");
-                    return;
-                    // the correct implementation is below
-                    //self.machine_state = MaxGrow(unimplemented!());
-                    //self.on_poll();
-                }
-                else {
-                    self.state = TotalWeaken(new_weakens_left);
-                }
 
                 // spawn another one grace period later. this will happen
                 // regardless if it's finished or not
@@ -358,6 +365,9 @@ impl TargetStateBundle {
                     MILLISECOND * 50.,
                     self.machine_name.clone(),
                 ));
+
+                // update the state
+                self.state = TotalWeaken(new_weakens_left);
             },
             /*
             MaxGrow(grows_left) => {

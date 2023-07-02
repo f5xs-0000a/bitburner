@@ -62,6 +62,7 @@ pub trait EventLoopState {
     );
 }
 
+#[derive(Debug)]
 struct EventWrapper<E>(E)
 where
     E: Event;
@@ -122,6 +123,7 @@ where
     }
 }
 
+#[derive(Debug)]
 pub struct EventLoop<E>
 where
     E: EventLoopState,
