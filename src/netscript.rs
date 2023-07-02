@@ -194,6 +194,20 @@ extern "C" {
     ) -> bool;
 
     #[wasm_bindgen(method)]
+    fn growthAnalyze(
+        this: &NS,
+        host: &str,
+        growth_factor: f64,
+        cores: Option<i32>,
+    ) -> f64;
+
+    #[wasm_bindgen(method)]
+    fn getServerMoneyAvailable(
+        this: &NS,
+        host: &str
+    ) -> u64;
+
+    #[wasm_bindgen(method)]
     fn getHostname(this: &NS) -> JsValue;
 
     pub type Server;
@@ -450,5 +464,21 @@ impl<'a> NsWrapper<'a> {
         pid: i32,
     ) -> bool {
         self.0.lock().unwrap().kill(pid)
+    }
+
+    pub fn growth_analyze(
+        &self,
+        host: &str,
+        growth_factor: f64,
+        cores: Option<i32>,
+    ) -> f64 {
+        self.0.lock().unwrap().growthAnalyze(host, growth_factor, cores)
+    }
+
+    pub fn get_server_money_available(
+        &self,
+        hostname: &str
+    ) -> u64 {
+        self.0.lock().unwrap().getServerMoneyAvailable(hostname)
     }
 }

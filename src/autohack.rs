@@ -25,7 +25,10 @@ use crate::{
         MILLISECOND,
         SECOND,
     },
-    utils::rational_mult_u64,
+    utils::{
+        rational_mult_u64,
+        rational_mult_usize,
+    },
 };
 use crate::{
     machine::Machine,
@@ -108,7 +111,7 @@ impl Event for AutoHackEventWrapped {
 #[derive(Debug, Clone)]
 enum TargetState {
     TotalWeaken(usize),
-    //MaxGrow,
+    MaxGrow,
     //Analysis,
     //Hack,
 }
@@ -318,15 +321,15 @@ impl TargetStateBundle {
         use SplitType::*;
         use TargetState::*;
 
+        let now = Date::now();
+
         match self.state.clone() {
             TotalWeaken(weakens_left) => {
-                let now = Date::now();
-
                 if weakens_left == 0 {
                     // correct implementation is below
                     // NOTE: assume that max_grow performs creating another poll
-                    //self.machine_state = MaxGrow(unimplemented!());
-                    //self.on_poll(ns, ctx, govr);
+                    self.state = MaxGrow;
+                    self.on_poll(ns, ctx, govr);
 
                     return;
                 }
@@ -361,7 +364,7 @@ impl TargetStateBundle {
                 ctx.add_event(AutoHackEventWrapped::new_poll_target(
                     // TODO: there should be a proper place where you get the
                     // grace period
-                    Date::now() + MILLISECOND * 50. * 2.,
+                    now + MILLISECOND * 50. * 2.,
                     MILLISECOND * 50.,
                     self.machine_name.clone(),
                 ));
@@ -369,20 +372,83 @@ impl TargetStateBundle {
                 // update the state
                 self.state = TotalWeaken(new_weakens_left);
             },
-            /*
-            MaxGrow(grows_left) => {
-                // calculate how many weakens you need to do
-                let weakens_required = unimplemented!();
+
+            MaxGrow => {
+                // calculate how many grow and weakens we need to do
+                let grows_required = get_potential_grow_amt(ns, &*self.machine);
+
+                if grows_required == 0 {
+                    // unimplemented!(); we move to actual hacking
+                    return;
+                }
+
+                let weakens_required = rational_mult_usize(
+                    grows_required,
+                    12.5f64.recip(),
+                ).min(1);
+
+                let hack_time = self.machine.get_hack_time(ns);
+
+                // spawn the grow half
+                let maybe_g_pid_meta = self.spawn_hgw(
+                    ns,
+                    HGW::Grow,
+                    govr.get_hackers_iter(),
+                    now, // TODO: are these correct?
+                    now + (4. - 3.2) * hack_time - MILLISECOND * 50.,
+                    grows_required,
+                    NoSplit, // NEVER split grows.
+                );
+
+                let mut g_pid_meta = match maybe_g_pid_meta {
+                    Some(m) => m,
+                    None => {
+                        self.on_no_memory();
+                        return;
+                    },
+                };
 
                 // spawn both
-                unimplemented!();
+                let maybe_w_pid_meta = self.spawn_hgw(
+                    ns,
+                    HGW::Weaken,
+                    govr.get_hackers_iter(),
+                    now, // TODO: are these correct?
+                    now,
+                    weakens_required,
+                    PartialSplit,
+                );
 
-                // check if spawns worked. if it did not, do on_no_memory()
-                unimplemented!();
+                let w_pid_meta = match maybe_w_pid_meta {
+                    Some(m) => m,
+                    None => {
+                        // kill the grows since we can't accompany it with
+                        // weakens
+                        for gpid in g_pid_meta.into_iter() {
+                            ns.kill(gpid.pid as i32);
+                        }
 
-                grows_left -= unimplemented!();
+                        self.on_no_memory();
+                        return;
+                    },
+                };
+
+                // extend the PIDs
+                g_pid_meta.extend(w_pid_meta.into_iter());
+
+                self.running_pids.push_front((now, g_pid_meta));
+
+                // TODO: spawn another poll one grace period + end time later
+                ctx.add_event(AutoHackEventWrapped::new_poll_target(
+                    // TODO: there should be a proper place where you get the
+                    // grace period
+                    now + hack_time * 4. + MILLISECOND * 50.,
+                    MILLISECOND * 50.,
+                    self.machine_name.clone(),
+                ));
             },
 
+            /*
             Hack => {
                 // spawn one weaken, one grow, another weaken, then one hack
                 unimplemented!();
@@ -637,15 +703,17 @@ impl AutoHackGovernor {
             return;
         }
 
+        // if we've levelled up, do many things
+
         // only regenerate hackers and targets upon level up
-        self.level = level;
+        self.hacking_level = level;
         self.regenerate_hackers_and_targets(ns);
 
         // set everything back to total weaken
-        for target in self.targets_by_score.iter() {
+        for (_, target) in self.targets_by_score.iter() {
             let mut target_lock = target.lock().unwrap();
 
-            target_lock.state = TotalWeaken(target_lock.machine.get_weaken_threads_to_reduce());
+            target_lock.state = TargetState::TotalWeaken(target_lock.machine.get_weaken_threads_to_reduce(ns));
         }
 
         // resort targets by score
@@ -692,6 +760,8 @@ impl EventLoopState for AutoHackGovernor {
         ctx: &mut EventLoopContext<Self::Event>,
     ) {
         use AutoHackEventType::*;
+
+        crate::debug!(ns, "{:?}", self);
 
         match event.event_type {
             PollTarget(target) => {
@@ -2020,3 +2090,10 @@ impl BatchHacker {
     }
 }
 */
+
+fn get_potential_grow_amt(ns: &NsWrapper<'_>, machine: &Machine) -> usize {
+    let money = machine.get_money_available(ns).min(1);
+    let growth_factor = machine.get_max_money() as f64 / money as f64;
+
+    ns.growth_analyze(machine.get_hostname(), growth_factor, None).ceil() as usize
+}
