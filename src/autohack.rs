@@ -268,8 +268,6 @@ impl TargetStateBundle {
             return None;
         }
 
-        ns.tprint(&format!("hackers: {:#?}", hackers));
-
         // the run time is different from spawn time
         // the spawn time is immediate.
         // the run time is spawn time + sleep time
@@ -383,6 +381,8 @@ impl TargetStateBundle {
 
                 if grows_required == 0 {
                     self.state = Hack;
+                    self.on_poll(ns, ctx, govr);
+
                     return;
                 }
 
@@ -442,7 +442,6 @@ impl TargetStateBundle {
 
                 self.running_pids.push_front((now, g_pid_meta));
 
-                // TODO: spawn another poll one grace period + end time later
                 ctx.add_event(AutoHackEventWrapped::new_poll_target(
                     // TODO: there should be a proper place where you get the
                     // grace period
@@ -453,11 +452,90 @@ impl TargetStateBundle {
             },
 
             Hack => {
-                // spawn one weaken, one grow, another weaken, then one hack
-                unimplemented!();
+                let mut new_pids = SmallVec::new();
 
-                // check if spawns worked. if it did not, do on_no_memory()
-                unimplemented!();
+                let hack_time = self.machine.get_hack_time(ns);
+
+                // spawn the hack
+                match self.spawn_hgw(
+                    ns,
+                    HGW::Hack,
+                    govr.get_hackers_iter(),
+                    now,
+                    now + (4. - 1.) * hack_time,
+                    1,
+                    PartialSplit,
+                ) {
+                    Some(pids) => new_pids.extend(pids.into_iter()),
+                    None => {
+                        kill_all(ns, new_pids.into_iter());
+                        self.on_no_memory();
+                        return;
+                    },
+                };
+
+                // spawn the first weaken
+                match self.spawn_hgw(
+                    ns,
+                    HGW::Weaken,
+                    govr.get_hackers_iter(),
+                    now,
+                    now + 50.,
+                    1,
+                    PartialSplit,
+                ) {
+                    Some(pids) => new_pids.extend(pids.into_iter()),
+                    None => {
+                        kill_all(ns, new_pids.into_iter());
+                        self.on_no_memory();
+                        return;
+                    }
+                };
+
+                // spawn the grow
+                match self.spawn_hgw(
+                    ns,
+                    HGW::Grow,
+                    govr.get_hackers_iter(),
+                    now,
+                    now + (4. - 3.2) * hack_time + 50. * 2.,
+                    1,
+                    PartialSplit,
+                ) {
+                    Some(pids) => new_pids.extend(pids.into_iter()),
+                    None => {
+                        kill_all(ns, new_pids.into_iter());
+                        self.on_no_memory();
+                        return;
+                    },
+                };
+
+                // spawn the second weaken
+                match self.spawn_hgw(
+                    ns,
+                    HGW::Weaken,
+                    govr.get_hackers_iter(),
+                    now,
+                    now + 50. * 3.,
+                    1,
+                    PartialSplit,
+                ) {
+                    Some(pids) => new_pids.extend(pids.into_iter()),
+                    None => {
+                        kill_all(ns, new_pids.into_iter());
+                        self.on_no_memory();
+                        return;
+                    },
+                };
+
+                self.running_pids.push_front((now, new_pids));
+
+                // spawn another that will hach this machine again
+                ctx.add_event(AutoHackEventWrapped::new_poll_target(
+                    now + 4. + MILLISECOND * 50.,
+                    MILLISECOND * 50.,
+                    self.machine_name.clone(),
+                ));
             },
         }
     }
@@ -875,4 +953,10 @@ fn get_potential_grow_amt(ns: &NsWrapper<'_>, machine: &Machine) -> usize {
     let growth_factor = machine.get_max_money() as f64 / money as f64;
 
     ns.growth_analyze(machine.get_hostname(), growth_factor, None).ceil() as usize
+}
+
+fn kill_all(ns: &NsWrapper<'_>, iter: impl Iterator<Item = RunningProcessMetadata>) {
+    for process in iter {
+        ns.kill(process.pid as i32);
+    }
 }
