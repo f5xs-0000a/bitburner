@@ -60,6 +60,12 @@ extern "C" {
     ) -> Result<i32, JsValue>;
 
     #[wasm_bindgen(method)]
+    fn kill(
+        this: &NS,
+        pid: i32,
+    ) -> bool;
+
+    #[wasm_bindgen(method)]
     fn scan(
         this: &NS,
         scan: Option<&str>,
@@ -436,6 +442,13 @@ impl<'a> NsWrapper<'a> {
         host: &str,
     ) -> bool {
         self.0.lock().unwrap().fileExists(file, host)
+    }
+
+    pub fn kill(
+        &self,
+        pid: i32,
+    ) -> bool {
+        self.0.lock().unwrap().kill(pid)
     }
 
     pub fn get_server_money_available(
