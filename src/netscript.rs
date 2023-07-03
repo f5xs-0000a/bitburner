@@ -207,6 +207,9 @@ extern "C" {
         host: &str,
     ) -> Result<f64, JsValue>;
 
+    #[wasm_bindgen(method)]
+    fn getHostname(this: &NS) -> JsValue;
+
     pub type Server;
 
     pub type Date;
@@ -356,6 +359,10 @@ impl<'a> NsWrapper<'a> {
 
     pub fn get_script_name(&self) -> String {
         self.0.lock().unwrap().getScriptName().as_string().unwrap()
+    }
+
+    pub fn get_hostname(&self) -> String {
+        self.0.lock().unwrap().getHostname().as_string().unwrap()
     }
 
     pub fn exec<'b>(
