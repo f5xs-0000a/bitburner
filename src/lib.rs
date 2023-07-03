@@ -2,6 +2,7 @@ mod autohack;
 mod machine;
 mod netscript;
 mod scan;
+mod script_deploy;
 mod utils;
 //mod range_set;
 
