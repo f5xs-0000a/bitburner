@@ -177,9 +177,8 @@ fn scan_mode(
     use DisplayMode::*;
 
     network.sort_unstable_by(|m1, m2| {
-        m1.get_degree()
-            .cmp(&m2.get_degree())
-            .then(m1.get_hostname().cmp(&m2.get_hostname()))
+        m1.get_min_hacking_skill().cmp(&m2.get_min_hacking_skill())
+            .then(m1.get_max_money().cmp(&m2.get_max_money()))
     });
 
     let (name_len, ip_len, org_len, mm_len, hs_len, sec_len, cc_len, rop_len) =
