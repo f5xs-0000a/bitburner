@@ -193,6 +193,14 @@ extern "C" {
         host: &str,
     ) -> bool;
 
+    #[wasm_bindgen(method)]
+    fn growthAnalyze(
+        this: &NS,
+        host: &str,
+        growth_factor: f64,
+        cores: Option<i32>,
+    ) -> f64;
+
     #[wasm_bindgen(catch, method)]
     fn getServerMoneyAvailable(
         this: &NS,
@@ -449,6 +457,15 @@ impl<'a> NsWrapper<'a> {
         pid: i32,
     ) -> bool {
         self.0.lock().unwrap().kill(pid)
+    }
+
+    pub fn growth_analyze(
+        &self,
+        host: &str,
+        growth_factor: f64,
+        cores: Option<i32>,
+    ) -> f64 {
+        self.0.lock().unwrap().growthAnalyze(host, growth_factor, cores)
     }
 
     pub fn get_server_money_available(
