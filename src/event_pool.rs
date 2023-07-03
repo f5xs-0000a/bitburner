@@ -97,10 +97,7 @@ where
         &self,
         other: &Self,
     ) -> Ordering {
-        self.0
-            .trigger_time()
-            .partial_cmp(&other.0.trigger_time())
-            .unwrap()
+        self.partial_cmp(&other).unwrap()
     }
 }
 
