@@ -14,7 +14,7 @@ const WEAKEN_SECURITY_DECREASE_THOUSANDTHS: usize = 50;
 const HACK_SECURITY_INCREASE_THOUSANDTHS: usize = 2;
 const GROW_SECURITY_INCREASE_THOUSANDTHS: usize = 4;
 
-const EXEC_MEMORY_USAGE_HUNDREDTHS: usize = 175;
+pub const EXEC_MEMORY_USAGE_HUNDREDTHS: u64 = 175;
 
 #[derive(Clone, Debug)]
 pub struct Machine {
@@ -22,7 +22,7 @@ pub struct Machine {
     degree: usize,
     traversal: Vec<String>,
 
-    max_money: usize,
+    max_money: u64,
     player_owned: bool,
     hacking_skill: usize,
     min_security: f64,
@@ -42,9 +42,10 @@ impl Machine {
         ns: &NsWrapper,
     ) {
         let server = ns.get_server(Some(self.get_hostname()));
+        let as_u64 = |x: &JsValue| x.as_f64().map(|x| x as u64);
         let as_usize = |x: &JsValue| x.as_f64().map(|x| x as usize);
 
-        self.max_money = get_attribute(&server, "moneyMax", as_usize)
+        self.max_money = get_attribute(&server, "moneyMax", as_u64)
             .unwrap()
             .unwrap();
         self.player_owned =
@@ -142,7 +143,7 @@ impl Machine {
         &*self.traversal
     }
 
-    pub fn get_max_money(&self) -> usize {
+    pub fn get_max_money(&self) -> u64 {
         self.max_money
     }
 
@@ -290,22 +291,22 @@ impl Machine {
     pub fn get_max_gb_ram_hundredths(
         &self,
         ns: &NsWrapper,
-    ) -> usize {
-        (self.get_max_gb_ram(ns) * 100.).round() as usize
+    ) -> u64 {
+        (self.get_max_gb_ram(ns) * 100.).round() as u64
     }
 
-    pub fn get_used_gb_ram_hundredts(
+    pub fn get_used_gb_ram_hundredths(
         &self,
         ns: &NsWrapper,
-    ) -> usize {
-        (self.get_used_gb_ram(ns) * 100.).round() as usize
+    ) -> u64 {
+        (self.get_used_gb_ram(ns) * 100.).round() as u64
     }
 
     pub fn get_free_ram_hundredths(
         &self,
         ns: &NsWrapper,
-    ) -> usize {
-        self.get_max_gb_ram_hundredths(ns) - self.get_used_gb_ram_hundredts(ns)
+    ) -> u64 {
+        self.get_max_gb_ram_hundredths(ns) - self.get_used_gb_ram_hundredths(ns)
     }
 
     pub fn get_security_level(
@@ -343,7 +344,7 @@ impl Machine {
     pub fn get_threads_left(
         &self,
         ns: &NsWrapper,
-    ) -> usize {
+    ) -> u64 {
         self.get_free_ram_hundredths(ns) / EXEC_MEMORY_USAGE_HUNDREDTHS
     }
 
