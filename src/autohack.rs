@@ -52,8 +52,15 @@ pub async fn auto_hack(ns: &NsWrapper<'_>) {
 #[derive(Debug)]
 enum AutoHackEventType {
     PollTarget(Arc<str>),
-    MemoryFreed(Arc<str>),
+    MemoryFreed,
     GeneralPoll,
+}
+
+#[derive(Debug, Eq, PartialEq)]
+enum MemoryFreeUsage {
+    NoMemory,
+    NotRequired,
+    MemoryAllocated,
 }
 
 #[derive(Debug)]
@@ -79,12 +86,11 @@ impl AutoHackEventWrapped {
     pub fn new_memory_freed(
         trigger_time: f64,
         grace_period: f64,
-        target: Arc<str>,
     ) -> AutoHackEventWrapped {
         AutoHackEventWrapped {
             trigger_time,
             grace_period,
-            event_type: AutoHackEventType::MemoryFreed(target),
+            event_type: AutoHackEventType::MemoryFreed,
         }
     }
 
@@ -309,8 +315,6 @@ impl TargetStateBundle {
             metadatas.push(metadata);
         }
 
-        ns.tprint(&format!("metas: {:#?}", metadatas));
-
         Some(metadatas)
     }
 
@@ -324,6 +328,7 @@ impl TargetStateBundle {
         use TargetState::*;
 
         let now = Date::now();
+        let hack_time = self.machine.get_hack_time(ns); // TODO: use HGW time
 
         match self.state.clone() {
             TotalWeaken(weakens_left) => {
@@ -354,6 +359,8 @@ impl TargetStateBundle {
                     },
                     Some(pidm) => pidm,
                 };
+
+                ctx.add_event(AutoHackEventWrapped::new_memory_freed(now + hack_time * 4. + 5., 50.));
 
                 let new_weakens_left = weakens_left
                     - pid_meta.iter().map(|meta| meta.threads).sum::<usize>();
@@ -389,9 +396,7 @@ impl TargetStateBundle {
                 let weakens_required = rational_mult_usize(
                     grows_required,
                     12.5f64.recip(),
-                ).min(1);
-
-                let hack_time = self.machine.get_hack_time(ns);
+                ).max(1);
 
                 // spawn the grow half
                 let maybe_g_pid_meta = self.spawn_hgw(
@@ -422,6 +427,8 @@ impl TargetStateBundle {
                     weakens_required,
                     PartialSplit,
                 );
+
+                ctx.add_event(AutoHackEventWrapped::new_memory_freed(now + hack_time * 4. + 5., 50.));
 
                 let w_pid_meta = match maybe_w_pid_meta {
                     Some(m) => m,
@@ -462,7 +469,7 @@ impl TargetStateBundle {
                     HGW::Hack,
                     govr.get_hackers_iter(),
                     now,
-                    now + (4. - 1.) * hack_time,
+                    now + (4. - 1.) * hack_time - 50.,
                     1,
                     PartialSplit,
                 ) {
@@ -480,7 +487,7 @@ impl TargetStateBundle {
                     HGW::Weaken,
                     govr.get_hackers_iter(),
                     now,
-                    now + 50.,
+                    now,
                     1,
                     PartialSplit,
                 ) {
@@ -498,7 +505,7 @@ impl TargetStateBundle {
                     HGW::Grow,
                     govr.get_hackers_iter(),
                     now,
-                    now + (4. - 3.2) * hack_time + 50. * 2.,
+                    now + (4. - 3.2) * hack_time + 50.,
                     1,
                     PartialSplit,
                 ) {
@@ -516,7 +523,7 @@ impl TargetStateBundle {
                     HGW::Weaken,
                     govr.get_hackers_iter(),
                     now,
-                    now + 50. * 3.,
+                    now + 50. * 2.,
                     1,
                     PartialSplit,
                 ) {
@@ -527,6 +534,8 @@ impl TargetStateBundle {
                         return;
                     },
                 };
+
+                ctx.add_event(AutoHackEventWrapped::new_memory_freed(now + hack_time * 4. + 5. + 50. * 2., 50.));
 
                 self.running_pids.push_front((now, new_pids));
 
@@ -555,21 +564,29 @@ impl TargetStateBundle {
         ns: &NsWrapper<'_>,
         ctx: &mut EventLoopContext<AutoHackEventWrapped>,
         govr: &mut AutoHackGovernor,
-    ) -> bool {
+    ) -> MemoryFreeUsage {
+        use MemoryFreeUsage::*;
+
         if self.is_waiting_for_memory {
             // set is_waiting_for_memory to be false. it will be set true if we
             // tried to spawn and yet nothing happened
             self.is_waiting_for_memory = false;
 
-            // TODO: check if this is still consistent
             self.on_poll(ns, ctx, govr);
 
             // is_waiting_for_memory will be true if there is still no
             // memory even if we did poll() so use that to check.
-            return !self.is_waiting_for_memory;
+            if self.is_waiting_for_memory {
+                NoMemory
+            }
+
+            else {
+                MemoryAllocated
+            }
         }
+
         else {
-            false
+            NotRequired
         }
     }
 }
@@ -849,7 +866,16 @@ impl EventLoopState for AutoHackGovernor {
                 target_lock.on_poll(ns, ctx, self);
             },
 
-            MemoryFreed(_) => {
+            MemoryFreed => {
+                // TODO: this is an expensive clone.
+                for (name, machine) in self.targets_by_score.clone().into_iter() {
+                    let mut target_lock = machine.lock().unwrap();
+
+                    // if we finally have no memory left, break away
+                    if target_lock.on_memory_freed(ns, ctx, self) == MemoryFreeUsage::NoMemory {
+                        break;
+                    }
+                }
             },
 
             GeneralPoll => {
