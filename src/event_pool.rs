@@ -42,31 +42,32 @@ where
     }
 }
 
-trait EventLoopState {
+pub trait EventLoopState {
     type Event: Event;
 
-    fn initial_run(
+    fn initial_run<'a>(
         &mut self,
-        ns: &NsWrapper<'_>,
+        ns: &NsWrapper<'a>,
         ctx: &mut EventLoopContext<Self::Event>,
     );
 
-    fn on_event(
+    fn on_event<'a>(
         &mut self,
-        ns: &NsWrapper<'_>,
+        ns: &NsWrapper<'a>,
         event: Self::Event,
         ctx: &mut EventLoopContext<Self::Event>,
     );
 
-    fn on_event_fail(
+    fn on_event_fail<'a>(
         &mut self,
-        ns: &NsWrapper<'_>,
+        ns: &NsWrapper<'a>,
         event: Self::Event,
         ctx: &mut EventLoopContext<Self::Event>,
     );
 }
 
-struct EventWrapper<E>(E)
+#[derive(Debug)]
+pub struct EventWrapper<E>(pub E)
 where
     E: Event;
 
@@ -126,7 +127,8 @@ where
     }
 }
 
-struct EventLoop<E>
+#[derive(Debug)]
+pub struct EventLoop<E>
 where
     E: EventLoopState,
 {
@@ -139,7 +141,7 @@ impl<E> EventLoop<E>
 where
     E: EventLoopState,
 {
-    fn new(state: E) -> EventLoop<E> {
+    pub fn new(state: E) -> EventLoop<E> {
         EventLoop {
             event_pool: BinaryHeap::new(),
             state,
