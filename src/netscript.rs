@@ -187,6 +187,12 @@ extern "C" {
         host: &str,
     ) -> bool;
 
+    #[wasm_bindgen(catch, method)]
+    fn getServerMoneyAvailable(
+        this: &NS,
+        host: &str,
+    ) -> Result<f64, JsValue>;
+
     pub type Server;
 
     pub type Date;
@@ -430,5 +436,12 @@ impl<'a> NsWrapper<'a> {
         host: &str,
     ) -> bool {
         self.0.lock().unwrap().fileExists(file, host)
+    }
+
+    pub fn get_server_money_available(
+        &self,
+        hostname: &str
+    ) -> Result<u64, JsValue> {
+        self.0.lock().unwrap().getServerMoneyAvailable(hostname).map(|val| val.round() as u64)
     }
 }
