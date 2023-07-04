@@ -85,7 +85,7 @@ impl Event for AutoHackEventWrapped {
 #[derive(Debug, Clone)]
 enum TargetState {
     TotalWeaken(usize),
-    //MaxGrow,
+    MaxGrow,
     //Analysis,
     //Hack,
 }
@@ -299,8 +299,10 @@ impl TargetStateBundle {
         match self.state.clone() {
             TotalWeaken(weakens_left) => {
                 if weakens_left == 0 {
-                    // TODO: change the state to grow
-                    unimplemented!();
+                    self.state = MaxGrow;
+                    self.on_poll(ns, ctx, govr);
+
+                    return;
                 }
 
                 // spawn weaken
@@ -342,6 +344,80 @@ impl TargetStateBundle {
 
                 // update the state
                 self.state = TotalWeaken(new_weakens_left);
+            },
+
+            MaxGrow => {
+                // calculate how many grow and weakens we need to do
+                let grows_required = get_potential_grow_amt(ns, &*self.machine);
+
+                if grows_required == 0 {
+                    // start hacking
+                    unimplemented!();
+                }
+
+                let weakens_required = rational_mult_usize(
+                    grows_required,
+                    12.5f64.recip(),
+                ).max(1);
+
+                // spawn the grow half
+                let maybe_g_pid_meta = self.spawn_hgw(
+                    ns,
+                    HGW::Grow,
+                    govr.get_hackers_iter(),
+                    now,
+                    now + (4. - 3.2) * hack_time - MILLISECOND * 50.,
+                    grows_required,
+                    NoSplit, // NEVER split grows.
+                );
+
+                let mut g_pid_meta = match maybe_g_pid_meta {
+                    Some(m) => m,
+                    None => {
+                        self.on_no_memory();
+                        return;
+                    },
+                };
+
+                // spawn the weaken half
+                let maybe_w_pid_meta = self.spawn_hgw(
+                    ns,
+                    HGW::Weaken,
+                    govr.get_hackers_iter(),
+                    now,
+                    now,
+                    weakens_required,
+                    PartialSplit,
+                );
+
+                // TODO: free memory
+
+                let w_pid_meta = match maybe_w_pid_meta {
+                    Some(m) => m,
+                    None => {
+                        // kill the grows since we can't accompany it with
+                        // weakens
+                        for gpid in g_pid_meta.into_iter() {
+                            ns.kill(gpid.pid as i32);
+                        }
+
+                        self.on_no_memory();
+                        return;
+                    },
+                };
+
+                // extend the PIDs
+                g_pid_meta.extend(w_pid_meta.into_iter());
+
+                self.running_pids.push_front((now, g_pid_meta));
+
+                ctx.add_event(AutoHackEventWrapped::new_poll_target(
+                    // TODO: there should be a proper place where you get the
+                    // grace period
+                    now + hack_time * 4. + MILLISECOND * 50.,
+                    MILLISECOND * 50.,
+                    self.machine_name.clone(),
+                ));
             },
 
             _ => unimplemented!(),
