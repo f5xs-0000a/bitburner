@@ -900,6 +900,9 @@ impl EventLoopState for AutoHackGovernor {
         event: Self::Event,
         ctx: &mut EventLoopContext<Self::Event>,
     ) {
+        // as of right now, we have no reasons to deny a poll. it's adaptive
+        // enough on its own.
+        self.on_event(ns, event, ctx);
     }
 
     fn post_loop_inspect<'a>(
