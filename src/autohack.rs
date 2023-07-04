@@ -48,7 +48,7 @@ pub async fn auto_hack(ns: &NsWrapper<'_>) {
 enum AutoHackEventType {
     PollTarget(Arc<str>),
     MemoryFreed,
-    //GeneralPoll,
+    GeneralPoll,
 }
 
 #[derive(Debug, Eq, PartialEq)]
@@ -86,6 +86,17 @@ impl AutoHackEventWrapped {
             trigger_time,
             grace_period,
             event_type: AutoHackEventType::MemoryFreed,
+        }
+    }
+
+    pub fn new_general_poll(
+        trigger_time: f64,
+        grace_period: f64,
+    ) -> AutoHackEventWrapped {
+        AutoHackEventWrapped {
+            trigger_time,
+            grace_period,
+            event_type: AutoHackEventType::GeneralPoll,
         }
     }
 }
@@ -815,7 +826,13 @@ impl EventLoopState for AutoHackGovernor {
             ctx.add_event(event);
         }
 
-        // TODO: create a general poll
+        // create a poll to update the level
+        let event = AutoHackEventWrapped::new_general_poll(
+            next_second,
+            MILLISECOND * 50.,
+        );
+
+        ctx.add_event(event);
     }
 
     fn on_event<'a>(
@@ -846,7 +863,17 @@ impl EventLoopState for AutoHackGovernor {
                 }
             },
 
-            GeneralPoll => unimplemented!(),
+            GeneralPoll => {
+                self.do_level_up_check(ns);
+
+                // spawn another general poll request
+                ctx.add_event(
+                    AutoHackEventWrapped::new_general_poll(
+                        Date::now() + SECOND,
+                        MILLISECOND * 50.
+                    )
+                );
+            },
         }
     }
 
