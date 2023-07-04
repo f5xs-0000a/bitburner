@@ -425,6 +425,10 @@ fn backdoor_mode(
             continue;
         }
 
+        if !machine.is_root(ns) {
+            continue;
+        }
+
         write!(&mut print_str, "\nhome; ").unwrap();
         for traversal in machine.get_traversal().iter().skip(1) {
             write!(&mut print_str, "connect {}; ", traversal).unwrap();
