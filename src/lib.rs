@@ -5,6 +5,7 @@ mod scan;
 mod script_deploy;
 mod time_consts;
 mod utils;
+//mod contracts;
 mod event_pool;
 //mod range_set;
 
