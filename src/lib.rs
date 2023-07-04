@@ -3,6 +3,7 @@ mod machine;
 mod netscript;
 mod scan;
 mod script_deploy;
+mod time_consts;
 mod utils;
 mod event_pool;
 //mod range_set;
