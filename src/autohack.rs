@@ -42,6 +42,9 @@ use crate::{
 const RESERVATION_RATE: f64 = 0.9;
 
 pub async fn auto_hack(ns: &NsWrapper<'_>) {
+    // disable logging. at all.
+    ns.disable_log("ALL");
+
     let mut ahg = EventLoop::new(AutoHackGovernor::new(ns));
     ahg.run(ns).await;
 }
