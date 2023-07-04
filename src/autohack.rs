@@ -124,6 +124,20 @@ enum TargetState {
     Hack,
 }
 
+impl TargetState {
+    fn is_total_weaken(&self) -> bool {
+        matches!(self, TargetState::TotalWeaken(_))
+    }
+
+    fn is_max_grow(&self) -> bool {
+        matches!(self, TargetState::MaxGrow)
+    }
+
+    fn is_hack(&self) -> bool {
+        matches!(self, TargetState::Hack)
+    }
+}
+
 #[derive(Debug)]
 struct RunningProcessMetadata {
     pid: usize,
@@ -814,6 +828,11 @@ impl AutoHackGovernor {
         // set everything back to total weaken
         for key in self.targets_by_score.iter() {
             let target = self.targets_by_name.get_mut(key).unwrap();
+
+            // don't interrupt an already weakening process with another one
+            if target.state.is_total_weaken() {
+                continue;
+            }
 
             target.state = TargetState::TotalWeaken(
                 target.machine.get_weaken_threads_to_reduce(ns),
