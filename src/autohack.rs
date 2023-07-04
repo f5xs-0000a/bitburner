@@ -51,7 +51,7 @@ pub async fn auto_hack(ns: &NsWrapper<'_>) {
 
 #[derive(Debug)]
 enum AutoHackEventType {
-    PollTarget(Arc<str>),
+    PollTarget(u64),
     MemoryFreed,
     GeneralPoll,
 }
@@ -74,12 +74,12 @@ impl AutoHackEventWrapped {
     pub fn new_poll_target(
         trigger_time: f64,
         grace_period: f64,
-        target: Arc<str>,
+        target_hash: u64,
     ) -> AutoHackEventWrapped {
         AutoHackEventWrapped {
             trigger_time,
             grace_period,
-            event_type: AutoHackEventType::PollTarget(target),
+            event_type: AutoHackEventType::PollTarget(target_hash),
         }
     }
 
@@ -205,8 +205,7 @@ fn find_available_hackers(
 
 #[derive(Debug)]
 struct TargetStateBundle {
-    machine_name: Arc<str>,
-    machine: Arc<Machine>,
+    machine: Machine,
 
     state: TargetState,
     is_waiting_for_memory: bool,
@@ -219,15 +218,17 @@ struct TargetStateBundle {
 }
 
 impl TargetStateBundle {
+    fn get_hash(&self) -> u64 {
+        get_machine_hash(&self.machine)
+    }
+
     fn new(
         ns: &NsWrapper<'_>,
-        machine_name: Arc<str>,
-        machine: Arc<Machine>,
+        machine: Machine,
     ) -> TargetStateBundle {
         let weakens_required = machine.get_weaken_threads_to_reduce(ns);
 
         TargetStateBundle {
-            machine_name,
             machine,
             state: TargetState::TotalWeaken(weakens_required),
             is_waiting_for_memory: false,
@@ -288,7 +289,7 @@ impl TargetStateBundle {
                     hgw.script().filename,
                     hacker.get_hostname(),
                     Some(threads),
-                    &[&*self.machine_name, &sleep_time_str],
+                    &[self.machine.get_hostname(), &sleep_time_str],
                 )
                 .unwrap();
 
@@ -375,7 +376,7 @@ impl TargetStateBundle {
                     // grace period
                     now + MILLISECOND * 50. * 2.,
                     MILLISECOND * 50.,
-                    self.machine_name.clone(),
+                    self.get_hash(),
                 ));
 
                 // update the state
@@ -384,7 +385,7 @@ impl TargetStateBundle {
 
             MaxGrow => {
                 // calculate how many grow and weakens we need to do
-                let grows_required = get_potential_grow_amt(ns, &*self.machine);
+                let grows_required = get_potential_grow_amt(ns, &self.machine);
 
                 if grows_required == 0 {
                     self.state = Hack;
@@ -455,7 +456,7 @@ impl TargetStateBundle {
                     // grace period
                     now + hack_time * 4. + MILLISECOND * 50.,
                     MILLISECOND * 50.,
-                    self.machine_name.clone(),
+                    self.get_hash(),
                 ));
             },
 
@@ -547,7 +548,7 @@ impl TargetStateBundle {
                 ctx.add_event(AutoHackEventWrapped::new_poll_target(
                     now + 4. + MILLISECOND * 50.,
                     MILLISECOND * 50.,
-                    self.machine_name.clone(),
+                    self.get_hash(),
                 ));
             },
         }
@@ -590,13 +591,10 @@ impl TargetStateBundle {
 #[derive(Debug)]
 struct AutoHackGovernor {
     hackers: VecDeque<Arc<Machine>>,
-    targets_by_name: HashMap<Arc<str>, Arc<Mutex<TargetStateBundle>>>,
-    targets_by_score: Vec<(Arc<str>, Arc<Mutex<TargetStateBundle>>)>,
+    targets_by_name: HashMap<u64, TargetStateBundle>,
+    targets_by_score: Vec<u64>,
 
     hacking_level: usize,
-    // TODO after everything works: create a buffer so you don't get to
-    // allocate buffers every time, which is bad for a bump-based allocator like
-    // bumpalo
 }
 
 impl AutoHackGovernor {
@@ -612,19 +610,19 @@ impl AutoHackGovernor {
         ahg
     }
 
-    /// Returns a list of hostnames currently used as a hacker and a target.
-    fn get_used_hostnames(
+    /// Returns a list of hostname hashes currently used as a hacker and a
+    /// target.
+    fn get_used_hostname_hashes(
         &self,
-        mut buffer: Vec<Arc<str>>,
-    ) -> Vec<Arc<str>> {
+        mut buffer: Vec<u64>,
+    ) -> Vec<u64> {
         buffer.clear();
 
         let iter_1 = self.targets_by_name.keys().cloned();
         let iter_2 = self
             .hackers
             .iter()
-            .map(|h| h.get_hostname())
-            .map(|hn| Arc::from(hn));
+            .map(|h| get_machine_hash(h));
 
         for val in iter_1.chain(iter_2) {
             buffer.push(val);
@@ -642,27 +640,27 @@ impl AutoHackGovernor {
     fn get_new_machines(
         &self,
         ns: &NsWrapper<'_>,
-        buffer_1: Vec<Arc<str>>,
-    ) -> Vec<(Arc<str>, Arc<Machine>)> {
-        let used_hostnames = self.get_used_hostnames(buffer_1);
+        buffer_1: Vec<u64>,
+    ) -> Vec<(u64, Machine)> {
+        let used_hostnames = self.get_used_hostname_hashes(buffer_1);
 
         let hacking_level = ns.get_player_hacking_level();
 
         get_machines(ns)
             .into_iter()
-            // don't allow machines that already exist in hackers and targets
-            // so we don't consume ns function runtime
-            .filter(|m| !used_hostnames
-                .iter()
-                .any(|uhn| &**uhn == m.get_hostname())
-            )
             // only allow machines, on both hackers and targets, to be within
             // our hacking level
             .filter(|m| m.get_min_hacking_skill() <= hacking_level)
+            .map(|m| (get_machine_hash(&m), m))
+            // don't allow machines that already exist in hackers and targets
+            // so we don't consume ns function runtime
+            .filter(|(h, _)| !used_hostnames
+                .iter()
+                .any(|uhn| *uhn == *h)
+            )
             // the machines must be rooted
             // TODO: just root it ourselves
-            .filter(|m| m.is_root(ns))
-            .map(|m| (Arc::from(m.get_hostname()), Arc::new(m)))
+            .filter(|(_, m)| m.is_root(ns))
             .collect::<Vec<_>>()
     }
 
@@ -670,7 +668,7 @@ impl AutoHackGovernor {
     fn get_new_hackers_from(
         &mut self,
         ns: &NsWrapper<'_>,
-        machines: &[(Arc<str>, Arc<Machine>)],
+        machines: &[(u64, Machine)],
         buffer: &mut Vec<Arc<Machine>>,
     ) {
         use crate::script_deploy::{
@@ -694,7 +692,8 @@ impl AutoHackGovernor {
 
                 deployed.then(|| h)
             })
-            .cloned();
+            .cloned()
+            .map(|m| Arc::new(m));
         buffer.extend(iter);
 
         // if there is nothing inside the buffer, exit
@@ -717,8 +716,8 @@ impl AutoHackGovernor {
     fn get_new_targets_from(
         &mut self,
         ns: &NsWrapper<'_>,
-        machines: &[(Arc<str>, Arc<Machine>)],
-        buffer: &mut Vec<(Arc<str>, Arc<Mutex<TargetStateBundle>>)>,
+        machines: &[(u64, Machine)],
+        buffer: &mut Vec<(u64, TargetStateBundle)>,
     ) {
         buffer.clear();
 
@@ -731,7 +730,7 @@ impl AutoHackGovernor {
             .filter(|(hn, _)| !self.targets_by_name.contains_key(hn))
             .cloned()
             // convert it into a TargetStateBundle
-            .map(|(hn, m)| (hn.clone(), Arc::new(Mutex::new(TargetStateBundle::new(ns, hn, m)))));
+            .map(|(hn, m)| (hn, TargetStateBundle::new(ns, m)));
         buffer.extend(iter);
 
         // if there is nothing inside the buffer, exit
@@ -739,11 +738,11 @@ impl AutoHackGovernor {
             return;
         }
 
-        // then move everything back into the hash map
-        self.targets_by_name.extend(buffer.iter().cloned());
+        // add the keys into the score
+        self.targets_by_score.extend(buffer.iter().map(|(k, _)| k).cloned());
 
-        // also add it into the sorted by score
-        self.targets_by_score.extend(buffer.drain(..));
+        // then move everything back into the hash map
+        self.targets_by_name.extend(buffer.drain(..));
 
         // then sort
         self.resort_targets_by_score(ns);
@@ -753,9 +752,14 @@ impl AutoHackGovernor {
         &mut self,
         ns: &NsWrapper<'_>,
     ) {
-        self.targets_by_score.sort_by_cached_key(|(_, m)| {
-            let mlock = m.lock().unwrap();
-            let avg_yld = mlock.machine.get_average_yield(ns);
+        self.targets_by_score.sort_by_cached_key(|key| {
+            let avg_yld = self
+                .targets_by_name
+                .get(key)
+                .unwrap()
+                .machine
+                .get_average_yield(ns);
+
             decorum::N64::from_inner(avg_yld)
         });
     }
@@ -809,11 +813,11 @@ impl AutoHackGovernor {
         self.regenerate_hackers_and_targets(ns);
 
         // set everything back to total weaken
-        for (_, target) in self.targets_by_score.iter() {
-            let mut target_lock = target.lock().unwrap();
+        for key in self.targets_by_score.iter() {
+            let target = self.targets_by_name.get_mut(key).unwrap();
 
-            target_lock.state = TargetState::TotalWeaken(
-                target_lock.machine.get_weaken_threads_to_reduce(ns),
+            target.state = TargetState::TotalWeaken(
+                target.machine.get_weaken_threads_to_reduce(ns),
             );
         }
 
@@ -861,22 +865,24 @@ impl EventLoopState for AutoHackGovernor {
         use AutoHackEventType::*;
 
         match event.event_type {
-            PollTarget(target) => {
-                let target =
-                    self.targets_by_name.get(&*target).unwrap().clone();
-                let mut target_lock = target.lock().unwrap();
-                target_lock.on_poll(ns, ctx, self);
+            PollTarget(key) => {
+                // take it out, do poll stuff on it, then put it back
+                let mut target = self.targets_by_name.remove(&key).unwrap();
+                target.on_poll(ns, ctx, self);
+                self.targets_by_name.insert(key, target);
             },
 
             MemoryFreed => {
                 // TODO: this is an expensive clone.
-                for (name, machine) in self.targets_by_score.clone().into_iter()
+                for key in self.targets_by_score.clone().into_iter()
                 {
-                    let mut target_lock = machine.lock().unwrap();
+                    let mut target = self.targets_by_name.remove(&key).unwrap();
+
+                    let free_result = target.on_memory_freed(ns, ctx, self);
+                    self.targets_by_name.insert(key, target);
 
                     // if we finally have no memory left, break away
-                    if target_lock.on_memory_freed(ns, ctx, self)
-                        == MemoryFreeUsage::NoMemory
+                    if free_result == MemoryFreeUsage::NoMemory
                     {
                         break;
                     }
@@ -1001,4 +1007,14 @@ fn kill_all(
     for process in iter {
         ns.kill(process.pid as i32);
     }
+}
+
+fn get_machine_hash(machine: &Machine) -> u64 {
+    use std::collections::hash_map::DefaultHasher;
+    use std::hash::Hasher as _;
+
+    let mut hasher = DefaultHasher::new();
+
+    hasher.write(machine.get_hostname().as_bytes());
+    hasher.finish()
 }
