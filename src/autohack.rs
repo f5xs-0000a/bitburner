@@ -619,10 +619,7 @@ impl AutoHackGovernor {
         buffer.clear();
 
         let iter_1 = self.targets_by_name.keys().cloned();
-        let iter_2 = self
-            .hackers
-            .iter()
-            .map(|h| get_machine_hash(h));
+        let iter_2 = self.hackers.iter().map(|h| get_machine_hash(h));
 
         for val in iter_1.chain(iter_2) {
             buffer.push(val);
@@ -739,7 +736,8 @@ impl AutoHackGovernor {
         }
 
         // add the keys into the score
-        self.targets_by_score.extend(buffer.iter().map(|(k, _)| k).cloned());
+        self.targets_by_score
+            .extend(buffer.iter().map(|(k, _)| k).cloned());
 
         // then move everything back into the hash map
         self.targets_by_name.extend(buffer.drain(..));
@@ -874,16 +872,14 @@ impl EventLoopState for AutoHackGovernor {
 
             MemoryFreed => {
                 // TODO: this is an expensive clone.
-                for key in self.targets_by_score.clone().into_iter()
-                {
+                for key in self.targets_by_score.clone().into_iter() {
                     let mut target = self.targets_by_name.remove(&key).unwrap();
 
                     let free_result = target.on_memory_freed(ns, ctx, self);
                     self.targets_by_name.insert(key, target);
 
                     // if we finally have no memory left, break away
-                    if free_result == MemoryFreeUsage::NoMemory
-                    {
+                    if free_result == MemoryFreeUsage::NoMemory {
                         break;
                     }
                 }
@@ -1010,8 +1006,10 @@ fn kill_all(
 }
 
 fn get_machine_hash(machine: &Machine) -> u64 {
-    use std::collections::hash_map::DefaultHasher;
-    use std::hash::Hasher as _;
+    use std::{
+        collections::hash_map::DefaultHasher,
+        hash::Hasher as _,
+    };
 
     let mut hasher = DefaultHasher::new();
 
