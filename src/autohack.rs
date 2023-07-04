@@ -87,7 +87,7 @@ enum TargetState {
     TotalWeaken(usize),
     MaxGrow,
     //Analysis,
-    //Hack,
+    Hack,
 }
 
 #[derive(Debug)]
@@ -351,8 +351,10 @@ impl TargetStateBundle {
                 let grows_required = get_potential_grow_amt(ns, &*self.machine);
 
                 if grows_required == 0 {
-                    // start hacking
-                    unimplemented!();
+                    self.state = Hack;
+                    self.on_poll(ns, ctx, govr);
+
+                    return;
                 }
 
                 let weakens_required = rational_mult_usize(
@@ -420,7 +422,94 @@ impl TargetStateBundle {
                 ));
             },
 
-            _ => unimplemented!(),
+            Hack => {
+                let mut new_pids = SmallVec::new();
+
+                let hack_time = self.machine.get_hack_time(ns);
+
+                // spawn the hack
+                match self.spawn_hgw(
+                    ns,
+                    HGW::Hack,
+                    govr.get_hackers_iter(),
+                    now,
+                    now + (4. - 1.) * hack_time - 50.,
+                    1,
+                    PartialSplit,
+                ) {
+                    Some(pids) => new_pids.extend(pids.into_iter()),
+                    None => {
+                        kill_all(ns, new_pids.into_iter());
+                        self.on_no_memory();
+                        return;
+                    },
+                };
+
+                // spawn the first weaken
+                match self.spawn_hgw(
+                    ns,
+                    HGW::Weaken,
+                    govr.get_hackers_iter(),
+                    now,
+                    now,
+                    1,
+                    PartialSplit,
+                ) {
+                    Some(pids) => new_pids.extend(pids.into_iter()),
+                    None => {
+                        kill_all(ns, new_pids.into_iter());
+                        self.on_no_memory();
+                        return;
+                    }
+                };
+
+                // spawn the grow
+                match self.spawn_hgw(
+                    ns,
+                    HGW::Grow,
+                    govr.get_hackers_iter(),
+                    now,
+                    now + (4. - 3.2) * hack_time + 50.,
+                    1,
+                    PartialSplit,
+                ) {
+                    Some(pids) => new_pids.extend(pids.into_iter()),
+                    None => {
+                        kill_all(ns, new_pids.into_iter());
+                        self.on_no_memory();
+                        return;
+                    },
+                };
+
+                // spawn the second weaken
+                match self.spawn_hgw(
+                    ns,
+                    HGW::Weaken,
+                    govr.get_hackers_iter(),
+                    now,
+                    now + 50. * 2.,
+                    1,
+                    PartialSplit,
+                ) {
+                    Some(pids) => new_pids.extend(pids.into_iter()),
+                    None => {
+                        kill_all(ns, new_pids.into_iter());
+                        self.on_no_memory();
+                        return;
+                    },
+                };
+
+                // TODO: free memory
+
+                self.running_pids.push_front((now, new_pids));
+
+                // spawn another that will hach this machine again
+                ctx.add_event(AutoHackEventWrapped::new_poll_target(
+                    now + 4. + MILLISECOND * 50.,
+                    MILLISECOND * 50.,
+                    self.machine_name.clone(),
+                ));
+            },
         }
     }
 
