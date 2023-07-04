@@ -15,6 +15,12 @@ extern "C" {
     pub type NS;
 
     #[wasm_bindgen(method)]
+    fn disableLog(
+        this: &NS,
+        function: &str,
+    );
+
+    #[wasm_bindgen(method)]
     fn tprint(
         this: &NS,
         print: &str,
@@ -487,5 +493,12 @@ impl<'a> NsWrapper<'a> {
             .unwrap()
             .getServerMoneyAvailable(hostname)
             .map(|val| val.round() as u64)
+    }
+
+    pub fn disable_log(
+        &self,
+        function: &str,
+    ) {
+        self.0.lock().unwrap().disableLog(function);
     }
 }
