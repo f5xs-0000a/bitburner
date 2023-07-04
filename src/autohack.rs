@@ -259,8 +259,6 @@ impl TargetStateBundle {
         threads: usize,
         split_type: SplitType,
     ) -> Option<SmallVec<[RunningProcessMetadata; 4]>> {
-        dbg!(threads);
-
         // if there are no available hackers to run our job, don't do it
         let hackers =
             match find_available_hackers(ns, hackers, threads, split_type) {
