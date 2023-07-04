@@ -645,9 +645,10 @@ impl AutoHackGovernor {
 
         get_machines(ns)
             .into_iter()
-            // only allow machines, on both hackers and targets, to be within
-            // our hacking level
-            .filter(|m| m.get_min_hacking_skill() <= hacking_level)
+            .filter_map(|mut m| match crate::scan::nuke_machine(ns, &mut m) {
+                crate::scan::NukeResult::NotNuked => None,
+                _ => Some(m)
+            })
             .map(|m| (get_machine_hash(&m), m))
             // don't allow machines that already exist in hackers and targets
             // so we don't consume ns function runtime

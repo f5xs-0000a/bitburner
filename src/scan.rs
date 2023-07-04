@@ -40,10 +40,39 @@ impl DerefMut for ScannedMachine {
     }
 }
 
-enum NukeResult {
+#[derive(PartialEq, Eq, Debug, Clone)]
+pub enum NukeResult {
     JustNuked,
     WasNuked,
     NotNuked,
+}
+
+pub fn nuke_machine(
+    ns: &NsWrapper,
+    machine: &mut Machine,
+) -> NukeResult {
+    use NukeResult::*;
+
+    if machine.is_root(ns) {
+        return WasNuked;
+    }
+
+    if ns.get_player_hacking_level() < machine.get_min_hacking_skill() {
+        return NotNuked;
+    }
+
+    machine.run_brute_ssh(ns);
+    machine.run_ftp_crack(ns);
+    machine.run_relay_smtp(ns);
+    machine.run_http_worm(ns);
+    machine.run_sql_inject(ns);
+
+    if machine.nuke(ns) {
+        JustNuked
+    }
+    else {
+        NotNuked
+    }
 }
 
 impl ScannedMachine {
@@ -51,28 +80,7 @@ impl ScannedMachine {
         &mut self,
         ns: &NsWrapper,
     ) -> NukeResult {
-        use NukeResult::*;
-
-        if self.is_root(ns) {
-            return WasNuked;
-        }
-
-        if ns.get_player_hacking_level() < self.get_min_hacking_skill() {
-            return NotNuked;
-        }
-
-        self.run_brute_ssh(ns);
-        self.run_ftp_crack(ns);
-        self.run_relay_smtp(ns);
-        self.run_http_worm(ns);
-        self.run_sql_inject(ns);
-
-        if self.0.nuke(ns) {
-            JustNuked
-        }
-        else {
-            NotNuked
-        }
+        nuke_machine(ns, &mut self.0)
     }
 }
 
