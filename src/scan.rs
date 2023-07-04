@@ -177,7 +177,8 @@ fn scan_mode(
     use DisplayMode::*;
 
     network.sort_unstable_by(|m1, m2| {
-        m1.get_min_hacking_skill().cmp(&m2.get_min_hacking_skill())
+        m1.get_min_hacking_skill()
+            .cmp(&m2.get_min_hacking_skill())
             .then(m1.get_max_money().cmp(&m2.get_max_money()))
     });
 

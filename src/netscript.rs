@@ -472,13 +472,20 @@ impl<'a> NsWrapper<'a> {
         growth_factor: f64,
         cores: Option<i32>,
     ) -> f64 {
-        self.0.lock().unwrap().growthAnalyze(host, growth_factor, cores)
+        self.0
+            .lock()
+            .unwrap()
+            .growthAnalyze(host, growth_factor, cores)
     }
 
     pub fn get_server_money_available(
         &self,
-        hostname: &str
+        hostname: &str,
     ) -> Result<u64, JsValue> {
-        self.0.lock().unwrap().getServerMoneyAvailable(hostname).map(|val| val.round() as u64)
+        self.0
+            .lock()
+            .unwrap()
+            .getServerMoneyAvailable(hostname)
+            .map(|val| val.round() as u64)
     }
 }

@@ -67,12 +67,10 @@ pub async fn execute_command(
 
 #[macro_export]
 macro_rules! debug {
-    ($ns: expr, $val:expr) => {
-        {
-            let first = format!("{}:{}\n{:#?}", file!(), line!(), $val);
-            $ns.tprint(&*first);
+    ($ns:expr, $val:expr) => {{
+        let first = format!("{}:{}\n{:#?}", file!(), line!(), $val);
+        $ns.tprint(&*first);
 
-            $val
-        }
-    };
+        $val
+    }};
 }

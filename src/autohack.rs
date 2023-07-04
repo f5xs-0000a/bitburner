@@ -1,7 +1,7 @@
 use std::{
     collections::{
-        HashMap,
         BinaryHeap,
+        HashMap,
         VecDeque,
     },
     sync::{
@@ -15,13 +15,19 @@ use smallvec::SmallVec;
 use crate::{
     event_pool::{
         Event,
-        EventWrapper,
         EventLoop,
         EventLoopContext,
         EventLoopState,
+        EventWrapper,
     },
-    machine::get_machines,
-    netscript::Date,
+    machine::{
+        get_machines,
+        Machine,
+    },
+    netscript::{
+        Date,
+        NsWrapper,
+    },
     script_deploy::HGW,
     time_consts::{
         MILLISECOND,
@@ -31,10 +37,6 @@ use crate::{
         rational_mult_u64,
         rational_mult_usize,
     },
-};
-use crate::{
-    machine::Machine,
-    netscript::NsWrapper,
 };
 
 const RESERVATION_RATE: f64 = 0.9;
@@ -176,7 +178,8 @@ fn find_available_hackers(
             break;
         }
 
-        let available_threads = (hacker.get_threads_left(ns) as usize).min(hgw_threads);
+        let available_threads =
+            (hacker.get_threads_left(ns) as usize).min(hgw_threads);
 
         // if this machine does not have any available threads left,
         // skip this machine
@@ -353,7 +356,10 @@ impl TargetStateBundle {
                     Some(pidm) => pidm,
                 };
 
-                ctx.add_event(AutoHackEventWrapped::new_memory_freed(now + hack_time * 4. + 5., 50.));
+                ctx.add_event(AutoHackEventWrapped::new_memory_freed(
+                    now + hack_time * 4. + 5.,
+                    50.,
+                ));
 
                 let new_weakens_left = weakens_left
                     - pid_meta.iter().map(|meta| meta.threads).sum::<usize>();
@@ -386,10 +392,8 @@ impl TargetStateBundle {
                     return;
                 }
 
-                let weakens_required = rational_mult_usize(
-                    grows_required,
-                    12.5f64.recip(),
-                ).max(1);
+                let weakens_required =
+                    rational_mult_usize(grows_required, 12.5f64.recip()).max(1);
 
                 // spawn the grow half
                 let maybe_g_pid_meta = self.spawn_hgw(
@@ -421,7 +425,10 @@ impl TargetStateBundle {
                     PartialSplit,
                 );
 
-                ctx.add_event(AutoHackEventWrapped::new_memory_freed(now + hack_time * 4. + 5., 50.));
+                ctx.add_event(AutoHackEventWrapped::new_memory_freed(
+                    now + hack_time * 4. + 5.,
+                    50.,
+                ));
 
                 let w_pid_meta = match maybe_w_pid_meta {
                     Some(m) => m,
@@ -489,7 +496,7 @@ impl TargetStateBundle {
                         kill_all(ns, new_pids.into_iter());
                         self.on_no_memory();
                         return;
-                    }
+                    },
                 };
 
                 // spawn the grow
@@ -528,7 +535,10 @@ impl TargetStateBundle {
                     },
                 };
 
-                ctx.add_event(AutoHackEventWrapped::new_memory_freed(now + hack_time * 4. + 5. + 50. * 2., 50.));
+                ctx.add_event(AutoHackEventWrapped::new_memory_freed(
+                    now + hack_time * 4. + 5. + 50. * 2.,
+                    50.,
+                ));
 
                 self.running_pids.push_front((now, new_pids));
 
@@ -566,12 +576,10 @@ impl TargetStateBundle {
             if self.is_waiting_for_memory {
                 NoMemory
             }
-
             else {
                 MemoryAllocated
             }
         }
-
         else {
             NotRequired
         }
@@ -740,7 +748,10 @@ impl AutoHackGovernor {
         self.resort_targets_by_score(ns);
     }
 
-    fn resort_targets_by_score(&mut self, ns: &NsWrapper<'_>) {
+    fn resort_targets_by_score(
+        &mut self,
+        ns: &NsWrapper<'_>,
+    ) {
         self.targets_by_score.sort_by_cached_key(|(_, m)| {
             let mlock = m.lock().unwrap();
             let avg_yld = mlock.machine.get_average_yield(ns);
@@ -780,7 +791,10 @@ impl AutoHackGovernor {
         }
     }
 
-    fn do_level_up_check(&mut self, ns: &NsWrapper<'_>) {
+    fn do_level_up_check(
+        &mut self,
+        ns: &NsWrapper<'_>,
+    ) {
         let level = ns.get_player_hacking_level();
 
         if level == self.hacking_level {
@@ -797,7 +811,9 @@ impl AutoHackGovernor {
         for (_, target) in self.targets_by_score.iter() {
             let mut target_lock = target.lock().unwrap();
 
-            target_lock.state = TargetState::TotalWeaken(target_lock.machine.get_weaken_threads_to_reduce(ns));
+            target_lock.state = TargetState::TotalWeaken(
+                target_lock.machine.get_weaken_threads_to_reduce(ns),
+            );
         }
 
         // resort targets by score
@@ -853,11 +869,14 @@ impl EventLoopState for AutoHackGovernor {
 
             MemoryFreed => {
                 // TODO: this is an expensive clone.
-                for (name, machine) in self.targets_by_score.clone().into_iter() {
+                for (name, machine) in self.targets_by_score.clone().into_iter()
+                {
                     let mut target_lock = machine.lock().unwrap();
 
                     // if we finally have no memory left, break away
-                    if target_lock.on_memory_freed(ns, ctx, self) == MemoryFreeUsage::NoMemory {
+                    if target_lock.on_memory_freed(ns, ctx, self)
+                        == MemoryFreeUsage::NoMemory
+                    {
                         break;
                     }
                 }
@@ -867,12 +886,10 @@ impl EventLoopState for AutoHackGovernor {
                 self.do_level_up_check(ns);
 
                 // spawn another general poll request
-                ctx.add_event(
-                    AutoHackEventWrapped::new_general_poll(
-                        Date::now() + SECOND,
-                        MILLISECOND * 50.
-                    )
-                );
+                ctx.add_event(AutoHackEventWrapped::new_general_poll(
+                    Date::now() + SECOND,
+                    MILLISECOND * 50.,
+                ));
             },
         }
     }
@@ -883,10 +900,13 @@ impl EventLoopState for AutoHackGovernor {
         event: Self::Event,
         ctx: &mut EventLoopContext<Self::Event>,
     ) {
-
     }
 
-    fn post_loop_inspect<'a>(&self, ns: &NsWrapper<'a>, event_heap: &BinaryHeap<EventWrapper<Self::Event>>) {
+    fn post_loop_inspect<'a>(
+        &self,
+        ns: &NsWrapper<'a>,
+        event_heap: &BinaryHeap<EventWrapper<Self::Event>>,
+    ) {
     }
 }
 
@@ -959,14 +979,21 @@ impl<'a> Iterator for AHGHackerIterator<'a> {
     }
 }
 
-fn get_potential_grow_amt(ns: &NsWrapper<'_>, machine: &Machine) -> usize {
+fn get_potential_grow_amt(
+    ns: &NsWrapper<'_>,
+    machine: &Machine,
+) -> usize {
     let money = machine.get_money_available(ns).max(1);
     let growth_factor = machine.get_max_money() as f64 / money as f64;
 
-    ns.growth_analyze(machine.get_hostname(), growth_factor, None).ceil() as usize
+    ns.growth_analyze(machine.get_hostname(), growth_factor, None)
+        .ceil() as usize
 }
 
-fn kill_all(ns: &NsWrapper<'_>, iter: impl Iterator<Item = RunningProcessMetadata>) {
+fn kill_all(
+    ns: &NsWrapper<'_>,
+    iter: impl Iterator<Item = RunningProcessMetadata>,
+) {
     for process in iter {
         ns.kill(process.pid as i32);
     }

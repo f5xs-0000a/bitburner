@@ -45,9 +45,8 @@ impl Machine {
         let as_u64 = |x: &JsValue| x.as_f64().map(|x| x as u64);
         let as_usize = |x: &JsValue| x.as_f64().map(|x| x as usize);
 
-        self.max_money = get_attribute(&server, "moneyMax", as_u64)
-            .unwrap()
-            .unwrap();
+        self.max_money =
+            get_attribute(&server, "moneyMax", as_u64).unwrap().unwrap();
         self.player_owned =
             get_attribute(&server, "purchasedByPlayer", JsValue::as_bool)
                 .unwrap()
@@ -179,7 +178,10 @@ impl Machine {
         &*self.organization_name
     }
 
-    pub fn get_money_available(&self, ns: &NsWrapper) -> u64 {
+    pub fn get_money_available(
+        &self,
+        ns: &NsWrapper,
+    ) -> u64 {
         ns.get_server_money_available(self.get_hostname()).unwrap()
     }
 

@@ -61,7 +61,11 @@ pub trait EventLoopState {
         ctx: &mut EventLoopContext<Self::Event>,
     );
 
-    fn post_loop_inspect<'a>(&self, ns: &NsWrapper<'a>, event_heap: &BinaryHeap<EventWrapper<Self::Event>>);
+    fn post_loop_inspect<'a>(
+        &self,
+        ns: &NsWrapper<'a>,
+        event_heap: &BinaryHeap<EventWrapper<Self::Event>>,
+    );
 }
 
 #[derive(Debug)]
