@@ -4,12 +4,17 @@ use std::{
         HashMap,
         VecDeque,
     },
+    fmt::Write as _,
     sync::{
         Arc,
         Mutex,
     },
 };
 
+use chrono::{
+    format::StrftimeItems,
+    NaiveDateTime,
+};
 use smallvec::SmallVec;
 
 use crate::{
@@ -229,9 +234,62 @@ struct TargetStateBundle {
     // first element is the spawn time, not the finish time
     // TODO: we need a way to clear this
     running_pids: VecDeque<(f64, SmallVec<[RunningProcessMetadata; 4]>)>,
+
+    last_poll: f64,
 }
 
 impl TargetStateBundle {
+    fn write_diagnostics<W>(
+        &self,
+        ns: &NsWrapper<'_>,
+        writable: &mut W,
+    ) -> Result<(), std::fmt::Error>
+    where
+        W: core::fmt::Write,
+    {
+        use crate::autohack::TargetState::*;
+
+        let state_hint = match &self.state {
+            TotalWeaken(_) => "TotalWeaken",
+            MaxGrow => "MaxGrow",
+            Hack => "Hack",
+        };
+
+        let waiting_hint = match self.is_waiting_for_memory {
+            true => "W",
+            false => " ",
+        };
+
+        let last_poll = self.last_poll as i64;
+        let strftime =
+            NaiveDateTime::from_timestamp_millis(last_poll).map(|ndt| {
+                ndt.format_with_items(StrftimeItems::new("%H:%M:%S%.3f"))
+            });
+
+        let money_available = self.machine.get_money_available(ns);
+
+        write!(
+            writable,
+            "| {:<20} | {:^11} | {} | ",
+            self.machine.get_hostname(),
+            state_hint,
+            waiting_hint,
+        )?;
+
+        match strftime {
+            Some(st) => write!(writable, "{}", st)?,
+            None => write!(writable, "Never polled")?,
+        };
+
+        write!(
+            writable,
+            " | {: >6.4}% | +{: >6.3}% |",
+            money_available as f64 / self.machine.get_max_money() as f64 * 100.,
+            self.machine.get_security_level(ns)
+                - self.machine.get_min_security(),
+        )
+    }
+
     fn get_hash(&self) -> u64 {
         get_machine_hash(&self.machine)
     }
@@ -247,6 +305,7 @@ impl TargetStateBundle {
             state: TargetState::TotalWeaken(weakens_required),
             is_waiting_for_memory: false,
             running_pids: Default::default(),
+            last_poll: f64::MIN,
         }
     }
 
@@ -343,6 +402,8 @@ impl TargetStateBundle {
 
         let now = Date::now();
         let hack_time = self.machine.get_hack_time(ns); // TODO: use HGW time
+
+        self.last_poll = now;
 
         match self.state.clone() {
             TotalWeaken(weakens_left) => {
@@ -663,6 +724,7 @@ impl AutoHackGovernor {
                 crate::scan::NukeResult::NotNuked => None,
                 _ => Some(m)
             })
+            //.filter(|m| m.get_min_hacking_skill() <= hacking_level)
             .map(|m| (get_machine_hash(&m), m))
             // don't allow machines that already exist in hackers and targets
             // so we don't consume ns function runtime
@@ -842,6 +904,32 @@ impl AutoHackGovernor {
         // resort targets by score
         self.resort_targets_by_score(ns);
     }
+
+    fn do_diagnostics(
+        &self,
+        ns: &NsWrapper<'_>,
+    ) {
+        let mut printable = String::new();
+
+        for key in self.targets_by_score.iter() {
+            let target = self.targets_by_name.get(key).unwrap();
+
+            target.write_diagnostics(ns, &mut printable).unwrap();
+            printable += "\n";
+        }
+
+        let now = Date::now();
+        let strftime = NaiveDateTime::from_timestamp_millis(now as i64)
+            .map(|ndt| {
+                ndt.format_with_items(StrftimeItems::new("%H:%M:%S%.3f"))
+            })
+            .unwrap();
+
+        write!(&mut printable, "Current time: {}", strftime);
+
+        ns.clear_log();
+        ns.print(&printable);
+    }
 }
 
 impl EventLoopState for AutoHackGovernor {
@@ -907,6 +995,7 @@ impl EventLoopState for AutoHackGovernor {
 
             GeneralPoll => {
                 self.do_level_up_check(ns);
+                self.do_diagnostics(ns);
 
                 // spawn another general poll request
                 ctx.add_event(AutoHackEventWrapped::new_general_poll(
