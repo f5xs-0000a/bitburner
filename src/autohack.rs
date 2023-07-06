@@ -460,7 +460,8 @@ impl TargetStateBundle {
 
             MaxGrow => {
                 // calculate how many grow and weakens we need to do
-                let grows_required = get_potential_grow_amt(ns, &self.machine);
+                let mut grows_required =
+                    get_potential_grow_amt(ns, &self.machine);
 
                 if grows_required == 0 {
                     self.state = Hack;
@@ -469,62 +470,69 @@ impl TargetStateBundle {
                     return;
                 }
 
-                let weakens_required =
-                    rational_mult_usize(grows_required, 12.5f64.recip()).max(1);
+                let mut new_pids = SmallVec::new();
 
-                // spawn the grow half
-                let maybe_g_pid_meta = self.spawn_hgw(
-                    ns,
-                    HGW::Grow,
-                    govr.get_hackers_iter(),
-                    now,
-                    now + (4. - 3.2) * hack_time - MILLISECOND * 50.,
-                    grows_required,
-                    NoSplit, // NEVER split grows.
-                );
+                // attempt to spawn multiple grows
+                // if it failed, keep halving the amount of grows done
+                // if we got less than 12, fail.
+                loop {
+                    let weakens_required =
+                        rational_mult_usize(grows_required, 12.5f64.recip())
+                            .max(1);
 
-                let mut g_pid_meta = match maybe_g_pid_meta {
-                    Some(m) => m,
-                    None => {
-                        self.on_no_memory();
-                        return;
-                    },
-                };
+                    macro_rules! on_failure {
+                        () => {{
+                            kill_all(ns, new_pids.drain(..));
+                            grows_required /= 2;
 
-                // spawn the weaken half
-                let maybe_w_pid_meta = self.spawn_hgw(
-                    ns,
-                    HGW::Weaken,
-                    govr.get_hackers_iter(),
-                    now,
-                    now,
-                    weakens_required,
-                    PartialSplit,
-                );
+                            if grows_required == 0 {
+                                self.on_no_memory();
+                                return;
+                            }
+
+                            continue;
+                        }};
+                    }
+
+                    // spawn the grow half
+                    match self.spawn_hgw(
+                        ns,
+                        HGW::Grow,
+                        govr.get_hackers_iter(),
+                        now,
+                        now + (4. - 3.2) * hack_time - MILLISECOND * 50.,
+                        grows_required,
+                        NoSplit, // NEVER split grows.
+                    ) {
+                        Some(m) => new_pids.extend(m.into_iter()),
+                        None => on_failure!(),
+                    };
+
+                    // spawn the weaken half
+                    match self.spawn_hgw(
+                        ns,
+                        HGW::Weaken,
+                        govr.get_hackers_iter(),
+                        now,
+                        now,
+                        weakens_required,
+                        PartialSplit,
+                    ) {
+                        Some(m) => new_pids.extend(m.into_iter()),
+                        None => on_failure!(),
+                    };
+
+                    // if we've reached this point, we've successfully grown
+                    // the machine
+                    break;
+                }
 
                 ctx.add_event(AutoHackEventWrapped::new_memory_freed(
                     now + hack_time * 4. + 5.,
                     50.,
                 ));
 
-                let w_pid_meta = match maybe_w_pid_meta {
-                    Some(m) => m,
-                    None => {
-                        // kill the grows since we can't accompany it with
-                        // weakens
-                        for gpid in g_pid_meta.into_iter() {
-                            ns.kill(gpid.pid as i32);
-                        }
-
-                        self.on_no_memory();
-                        return;
-                    },
-                };
-
-                // extend the PIDs
-                g_pid_meta.extend(w_pid_meta.into_iter());
-
-                self.running_pids.push_front((now, g_pid_meta));
+                self.running_pids.push_front((now, new_pids));
 
                 ctx.add_event(AutoHackEventWrapped::new_poll_target(
                     // TODO: there should be a proper place where you get the
